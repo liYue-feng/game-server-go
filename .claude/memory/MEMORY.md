@@ -1,0 +1,2 @@
+- [项目概览](project-overview.md) — Go游戏服务器，吸血鬼幸存者类微信小游戏后端
+- [代码注释风格](feedback-code-style.md) — 注释要写好，新手需要参考学习

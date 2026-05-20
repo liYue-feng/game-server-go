@@ -98,3 +98,10 @@ game_server_go/
 3. 关键验证无法执行时明确说明原因
 4. 禁止虚构命令输出
 5. 没有验证证据，不得声称完成
+
+## 跨设备记忆
+
+项目记忆存储在 `.claude/memory/` 目录，随 git 同步。
+新机器 clone 后运行 `make setup`，Claude Code 会读取这些文件恢复上下文。
+
+**配合仓库**: `game-client-unity`（Unity 客户端，协议层必须与此项目同步）

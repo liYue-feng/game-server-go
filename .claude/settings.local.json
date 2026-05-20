@@ -14,7 +14,9 @@
       "Bash(gh repo *)",
       "Bash(git push *)",
       "Bash(chmod +x .git-hooks/pre-commit)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(mkdir -p \"E:/person_file/game_server_go/.claude/memory\")",
+      "Bash(cp \"C:/Users/23906/.claude/projects/E--person-file-game-server-go/memory/\"* \"E:/person_file/game_server_go/.claude/memory/\")"
     ]
   }
 }
