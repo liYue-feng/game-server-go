@@ -1,0 +1,77 @@
+# docker-compose.yml
+#
+# 一键启动完整开发环境：游戏服务器 + MySQL + Redis
+#
+# 使用方式：
+#   开发环境：docker-compose up
+#   后台运行：docker-compose up -d
+#   停止：    docker-compose down
+#   查看日志：docker-compose logs -f game-server
+#
+# 注意：
+#   - 首次启动 MySQL 需要几秒钟初始化，游戏服务器可能连接失败
+#   - 可以先 docker-compose up mysql redis，等 MySQL 就绪后再启动游戏服务器
+#   - 或者用 depends_on + healthcheck（见下方 MySQL 配置）
+version: '3.8'
+
+services:
+  # ========== 游戏服务器 ==========
+  game-server:
+    build: .
+    ports:
+      - "8080:8080"  # WebSocket 游戏服务
+      - "8081:8081"  # HTTP 回调服务
+    environment:
+      # 通过环境变量覆盖配置（GAME_ 前缀）
+      - GAME_MYSQL_HOST=mysql
+      - GAME_MYSQL_PORT=3306
+      - GAME_MYSQL_USER=root
+      - GAME_MYSQL_PASSWORD=123456
+      - GAME_MYSQL_DBNAME=game_db
+      - GAME_REDIS_HOST=redis
+      - GAME_REDIS_PORT=6379
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: on-failure
+
+  # ========== MySQL 数据库 ==========
+  mysql:
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: "123456"
+      MYSQL_DATABASE: "game_db"
+      MYSQL_CHARSET: "utf8mb4"
+      MYSQL_COLLATION: "utf8mb4_unicode_ci"
+    volumes:
+      # 数据持久化：MySQL 数据存在 Docker volume 中，容器删除不丢失
+      - mysql_data:/var/lib/mysql
+      # 初始化脚本（首次启动时执行）
+      - ./deploy/mysql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --default-authentication-plugin=mysql_native_password
+    healthcheck:
+      # 健康检查：MySQL 可连接时才算就绪
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p123456"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ========== Redis 缓存 ==========
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes  # 开启 AOF 持久化
+
+volumes:
+  mysql_data:
+  redis_data:

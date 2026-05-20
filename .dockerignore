@@ -1,0 +1,8 @@
+.git
+bin/
+logs/
+*.exe
+*.test
+.env
+.env.local
+README.md

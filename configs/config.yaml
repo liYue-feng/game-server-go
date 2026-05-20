@@ -1,0 +1,35 @@
+# 游戏服务器配置
+server:
+  host: "0.0.0.0"   # 监听地址，0.0.0.0 表示所有网卡
+  port: 8080         # WebSocket 监听端口
+  name: "game-server" # 服务名称，用于日志标识
+
+# Redis 配置
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: ""       # 无密码留空即可
+  db: 0              # 使用的数据库编号（0-15）
+
+# MySQL 配置
+mysql:
+  host: "127.0.0.1"
+  port: 3306
+  user: "root"
+  password: "123456"
+  dbname: "game_db"  # 数据库名
+  max_idle_conns: 10 # 空闲连接池中的最大连接数
+  max_open_conns: 100 # 数据库的最大打开连接数
+
+# 微信小游戏配置
+wechat:
+  app_id: ""         # 小游戏 AppID，从微信公众平台获取
+  app_secret: ""     # 小游戏 AppSecret，从微信公众平台获取
+
+# 日志配置
+log:
+  level: "debug"     # 日志级别: debug / info / warn / error
+  filename: "logs/server.log" # 日志文件路径
+  max_size: 200      # 单个日志文件最大 MB
+  max_backups: 7     # 保留的旧日志文件最大数量
+  max_age: 30        # 保留旧日志文件的最大天数
