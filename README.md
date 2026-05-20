@@ -93,11 +93,11 @@ Length = 6 + len(Body)
 
 ```bash
 # 1. 克隆项目
-git clone <repo-url>
+git clone https://github.com/liYue-feng/game-server-go.git
 cd game_server_go
 
-# 2. 安装依赖
-go mod tidy
+# 2. 初始化开发环境（激活 git hooks + 安装依赖）
+make setup
 
 # 3. 启动 MySQL 和 Redis（确保已安装）
 # 或者用 Docker：docker-compose up mysql redis -d
@@ -111,6 +111,8 @@ make run
 # 6. 编译
 make build
 ```
+
+> **跨设备开发提示**：`make setup` 会激活 git pre-commit hook，确保每次提交都包含 `.claude/` 配置文件。这样在其他电脑 clone 后，Claude Code 可以直接延续对话上下文。
 
 ### Docker 部署
 

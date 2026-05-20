@@ -1,4 +1,4 @@
-.PHONY: build run clean test
+.PHONY: build run clean test setup
 
 # 项目名称
 APP_NAME := game-server
@@ -50,3 +50,11 @@ tidy:
 	@echo ">>> 整理依赖..."
 	go mod tidy
 	@echo ">>> 整理完成"
+
+# 初始化开发环境（clone 后首次运行）
+setup:
+	@echo ">>> 初始化开发环境..."
+	git config core.hooksPath .git-hooks
+	@echo ">>> Git hooks 已激活（每次提交自动包含 .claude/ 变更）"
+	go mod tidy
+	@echo ">>> 初始化完成"
