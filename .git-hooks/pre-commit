@@ -1,0 +1,8 @@
+#!/bin/bash
+# pre-commit hook: 自动将 .claude/ 目录的所有变更加入暂存区
+# 这样每次提交都会包含最新的 Claude 配置文件（settings、plans、memory 等）
+# 确保在其他电脑 clone 后能继续对话
+
+if [ -d ".claude" ]; then
+    git add .claude/
+fi

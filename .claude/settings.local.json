@@ -11,7 +11,10 @@
       "Bash(winget install *)",
       "Bash(export PATH=\"/c/Program Files/GitHub CLI:$PATH\")",
       "Bash(git commit -m ' *)",
-      "Bash(gh repo *)"
+      "Bash(gh repo *)",
+      "Bash(git push *)",
+      "Bash(chmod +x .git-hooks/pre-commit)",
+      "Bash(git config *)"
     ]
   }
 }
