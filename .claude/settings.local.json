@@ -1,4 +1,9 @@
 {
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "ark-fa2f8867-fe9c-4708-a26a-1cbf5af6f000-937fe",
+    "ANTHROPIC_BASE_URL": "https://ark.cn-beijing.volces.com/api/coding",
+    "ANTHROPIC_MODEL": "ark-code-latest"
+  },
   "permissions": {
     "allow": [
       "Bash(mkdir -p \"E:/person_file/game_server_go/.claude\")",
