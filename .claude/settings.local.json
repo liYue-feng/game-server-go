@@ -25,7 +25,21 @@
       "Bash(where go *)",
       "Read(//c/Program Files/Go/bin/**)",
       "Read(//c/Go/bin/**)",
-      "Bash(\"F:/goSdk/go1.26.3/bin/go.exe\" build *)"
+      "Bash(\"F:/goSdk/go1.26.3/bin/go.exe\" build *)",
+      "Bash(where mysql *)",
+      "Bash(where redis-server *)",
+      "Bash(where docker *)",
+      "Bash(docker --version)",
+      "Bash(mkdir -p E:/Docker)",
+      "Bash(curl -L -o \"E:/Docker/DockerDesktopInstaller.exe\" \"https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe\")",
+      "Bash(rm -f \"E:/Docker/DockerDesktopInstaller.exe\")",
+      "Bash(mkdir -p E:/MySQL E:/Redis)",
+      "Bash(curl -L -o \"E:/MySQL/mysql-8.0.zip\" \"https://cdn.mysql.com/Downloads/MySQL-8.0/mysql-8.0.40-winx64.zip\" --connect-timeout 30 --max-time 600)",
+      "Bash(curl -L -o \"E:/Redis/redis.zip\" \"https://github.com/tporadowski/redis/releases/download/v5.0.14.1/Redis-x64-5.0.14.1.zip\" --connect-timeout 30 --max-time 300)",
+      "Bash(F:/goSdk/go1.26.3/bin/go.exe build *)",
+      "Bash(F:/Own_project/game-server-go/bin/server.exe)",
+      "Bash(taskkill //F //IM server.exe)",
+      "Bash(taskkill //F //IM server)"
     ]
   }
 }

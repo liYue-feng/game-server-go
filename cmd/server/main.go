@@ -73,9 +73,13 @@ func main() {
 	// MySQL：玩家账号、存档、分数记录、订单的持久化存储
 	mysqlStore, err := store.NewMySQLStore(&cfg.MySQL)
 	if err != nil {
-		zap.L().Fatal("MySQL 初始化失败", zap.Error(err))
+		zap.L().Warn("MySQL 初始化失败，将降级运行", zap.Error(err))
 	}
-	defer mysqlStore.Close()
+	defer func() {
+		if mysqlStore != nil {
+			mysqlStore.Close()
+		}
+	}()
 
 	// Redis：会话缓存、排行榜、限流
 	redisStore, err := store.NewRedisStore(&cfg.Redis)
