@@ -59,6 +59,22 @@ const (
 	MsgID_GMCommandReq    uint16 = 6001 // GM指令请求
 	MsgID_GMCommandResp   uint16 = 6002 // GM指令响应
 
+	// ---- 战斗模块 ----
+	MsgID_CombatResultReq   uint16 = 4001 // 战斗结算请求（地牢通关/失败后上报）
+	MsgID_CombatResultResp  uint16 = 4002 // 战斗结算响应
+	MsgID_GetEnemyConfigsReq  uint16 = 4003 // 获取敌人配置请求
+	MsgID_GetEnemyConfigsResp uint16 = 4004 // 获取敌人配置响应
+	MsgID_GetDungeonConfigReq  uint16 = 4005 // 获取地牢配置请求
+	MsgID_GetDungeonConfigResp uint16 = 4006 // 获取地牢配置响应
+	MsgID_GetStyleConfigsReq  uint16 = 4007 // 获取流派配置请求
+	MsgID_GetStyleConfigsResp uint16 = 4008 // 获取流派配置响应
+	MsgID_UnlockStyleReq    uint16 = 4009 // 解锁流派请求
+	MsgID_UnlockStyleResp   uint16 = 4010 // 解锁流派响应
+	MsgID_GetPlayerStatsReq  uint16 = 4011 // 获取玩家战斗属性请求
+	MsgID_GetPlayerStatsResp uint16 = 4012 // 获取玩家战斗属性响应
+	MsgID_UpdatePlayerStatsReq  uint16 = 4013 // 更新玩家战斗属性请求
+	MsgID_UpdatePlayerStatsResp uint16 = 4014 // 更新玩家战斗属性响应
+
 	// ---- 系统消息 ----
 	MsgID_Error uint16 = 9999 // 通用错误消息
 )
@@ -143,6 +159,143 @@ type SubmitScoreReq struct {
 type SubmitScoreResp struct {
 	Success   bool  `json:"success"`    // 是否提交成功
 	BestScore int64 `json:"best_score"` // 该玩家的历史最高分
+}
+
+// ========== 战斗模块消息 ==========
+
+// CombatResultReq 战斗结算请求
+// 每次地牢通关或角色死亡后，客户端上报本局战斗数据。
+// 服务器做基础反作弊校验后，计算奖励并更新玩家数据。
+type CombatResultReq struct {
+	DungeonLevel  int     `json:"dungeon_level"`  // 地牢等级
+	Score         int     `json:"score"`           // 本局得分
+	Kills         int     `json:"kills"`           // 击杀数
+	SurvivalTime  float64 `json:"survival_time"`   // 存活时间（秒）
+	StyleID       int     `json:"style_id"`        // 使用的流派ID（0=无）
+	CombatLog     string  `json:"combat_log"`      // 简化战斗日志JSON，用于反作弊
+}
+
+// CombatResultResp 战斗结算响应
+type CombatResultResp struct {
+	Success    bool  `json:"success"`     // 是否结算成功
+	RewardGold int   `json:"reward_gold"` // 获得金币
+	RewardExp  int   `json:"reward_exp"`  // 获得经验
+	BestScore  int64 `json:"best_score"`  // 更新后的个人最高分
+}
+
+// EnemyConfigItem 敌人配置条目
+type EnemyConfigItem struct {
+	ID          int     `json:"id"`           // 敌人类型ID
+	Name        string  `json:"name"`         // 敌人名称
+	Hp          int     `json:"hp"`           // 生命值
+	Damage      int     `json:"damage"`       // 攻击伤害
+	Speed       float64 `json:"speed"`        // 移动速度
+	AttackRange float64 `json:"attack_range"` // 攻击范围
+	EnemyType   string  `json:"enemy_type"`   // 类型标识：grunt/archer/elite/boss
+}
+
+// GetEnemyConfigsReq 获取敌人配置请求
+type GetEnemyConfigsReq struct{}
+
+// GetEnemyConfigsResp 获取敌人配置响应
+type GetEnemyConfigsResp struct {
+	Configs []EnemyConfigItem `json:"configs"` // 敌人配置列表
+}
+
+// DungeonConfigItem 地牢配置
+type DungeonConfigItem struct {
+	Level         int     `json:"level"`          // 地牢等级
+	RoomCount     int     `json:"room_count"`     // 房间数量
+	EnemyDensity  float64 `json:"enemy_density"`  // 敌人密度系数
+	BossID        int     `json:"boss_id"`        // Boss类型ID
+}
+
+// GetDungeonConfigReq 获取地牢配置请求
+type GetDungeonConfigReq struct {
+	Level int `json:"level"` // 请求的地牢等级
+}
+
+// GetDungeonConfigResp 获取地牢配置响应
+type GetDungeonConfigResp struct {
+	Level        int                `json:"level"`         // 地牢等级
+	RoomCount    int                `json:"room_count"`    // 房间数量
+	EnemyDensity float64            `json:"enemy_density"` // 敌人密度
+	BossID       int                `json:"boss_id"`       // Boss类型ID
+	EnemyConfigs []EnemyConfigItem  `json:"enemy_configs"` // 该等级可出现的敌人
+}
+
+// StyleConfigItem 流派配置条目
+type StyleConfigItem struct {
+	StyleID             int     `json:"style_id"`              // 流派ID
+	StyleName           string  `json:"style_name"`            // 流派名称
+	DamageMult          float64 `json:"damage_mult"`           // 伤害倍率
+	SpeedMult           float64 `json:"speed_mult"`            // 速度倍率
+	ParryMult           float64 `json:"parry_mult"`            // 弹反窗口倍率
+	DashSpeedMult       float64 `json:"dash_speed_mult"`       // 冲刺速度倍率
+	DashCostMult        float64 `json:"dash_cost_mult"`        // 冲刺消耗倍率
+	SpecialResourceMax  int     `json:"special_resource_max"`  // 特殊资源上限
+	SpecialResourceName string  `json:"special_resource_name"` // 特殊资源名称
+	Description         string  `json:"description"`           // 流派描述
+}
+
+// GetStyleConfigsReq 获取流派配置请求
+type GetStyleConfigsReq struct{}
+
+// GetStyleConfigsResp 获取流派配置响应
+type GetStyleConfigsResp struct {
+	Styles []StyleConfigItem `json:"styles"` // 流派配置列表
+}
+
+// UnlockStyleReq 解锁流派请求
+type UnlockStyleReq struct {
+	StyleID int `json:"style_id"` // 要解锁的流派ID
+}
+
+// UnlockStyleResp 解锁流派响应
+type UnlockStyleResp struct {
+	Success  bool `json:"success"`   // 是否解锁成功
+	GoldCost int  `json:"gold_cost"` // 消耗金币
+}
+
+// PlayerStatsData 玩家战斗属性
+type PlayerStatsData struct {
+	Level          int   `json:"level"`           // 等级
+	Exp            int   `json:"exp"`             // 经验
+	Gold           int   `json:"gold"`            // 金币
+	MaxHp          int   `json:"max_hp"`          // 最大生命值
+	MaxStamina     int   `json:"max_stamina"`     // 最大耐力
+	AttackPower    int   `json:"attack_power"`    // 攻击力
+	UnlockedStyles []int `json:"unlocked_styles"` // 已解锁流派ID列表
+}
+
+// GetPlayerStatsReq 获取玩家战斗属性请求
+type GetPlayerStatsReq struct{}
+
+// GetPlayerStatsResp 获取玩家战斗属性响应
+type GetPlayerStatsResp struct {
+	Level          int   `json:"level"`
+	Exp            int   `json:"exp"`
+	Gold           int   `json:"gold"`
+	MaxHp          int   `json:"max_hp"`
+	MaxStamina     int   `json:"max_stamina"`
+	AttackPower    int   `json:"attack_power"`
+	UnlockedStyles []int `json:"unlocked_styles"`
+}
+
+// UpdatePlayerStatsReq 更新玩家战斗属性请求
+type UpdatePlayerStatsReq struct {
+	Level          int   `json:"level"`
+	Exp            int   `json:"exp"`
+	Gold           int   `json:"gold"`
+	MaxHp          int   `json:"max_hp"`
+	MaxStamina     int   `json:"max_stamina"`
+	AttackPower    int   `json:"attack_power"`
+	UnlockedStyles []int `json:"unlocked_styles"`
+}
+
+// UpdatePlayerStatsResp 更新玩家战斗属性响应
+type UpdatePlayerStatsResp struct {
+	Success bool `json:"success"`
 }
 
 // ErrorResp 通用错误响应

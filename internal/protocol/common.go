@@ -27,6 +27,13 @@ const (
 	// 排行榜模块错误
 	ErrRankInvalidType = 40001 // 无效的排行榜类型
 	ErrRankInvalidRange = 40002 // 无效的排名范围
+
+	// 战斗模块错误
+	ErrCombatInvalidResult   = 50001 // 战斗结算数据无效
+	ErrCombatCheatDetected   = 50002 // 检测到作弊行为
+	ErrCombatConfigNotFound  = 50003 // 战斗配置不存在
+	ErrCombatStyleLocked     = 50004 // 流派未解锁
+	ErrCombatInsufficientGold = 50005 // 金币不足
 )
 
 // IsSuccess 判断错误码是否为成功

@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"game-server/internal/combat"
 	"game-server/internal/config"
 	"game-server/internal/gateway"
 	"game-server/internal/game"
@@ -92,6 +93,7 @@ func main() {
 	gameHandler := game.NewHandler(mysqlStore, redisStore)
 	rankHandler := rank.NewHandler(redisStore, mysqlStore)
 	paymentHandler := payment.NewHandler(mysqlStore, redisStore, &cfg.Wechat)
+		combatHandler := combat.NewHandler(mysqlStore, redisStore)
 
 	// ========== 5. 注册消息路由 ==========
 	router := gateway.NewRouter()
@@ -118,7 +120,16 @@ func main() {
 	// 支付模块
 	router.Register(protocol.MsgID_CreateOrderReq, paymentHandler.HandleCreateOrder)
 
-	// GM 指令模块（管理员专用）
+	// 战斗模块
+		router.Register(protocol.MsgID_CombatResultReq, combatHandler.HandleCombatResult)
+		router.Register(protocol.MsgID_GetEnemyConfigsReq, combatHandler.HandleGetEnemyConfigs)
+		router.Register(protocol.MsgID_GetDungeonConfigReq, combatHandler.HandleGetDungeonConfig)
+		router.Register(protocol.MsgID_GetStyleConfigsReq, combatHandler.HandleGetStyleConfigs)
+		router.Register(protocol.MsgID_UnlockStyleReq, combatHandler.HandleUnlockStyle)
+		router.Register(protocol.MsgID_GetPlayerStatsReq, combatHandler.HandleGetPlayerStats)
+		router.Register(protocol.MsgID_UpdatePlayerStatsReq, combatHandler.HandleUpdatePlayerStats)
+
+		// GM 指令模块（管理员专用）
 	// TODO: 从配置文件读取管理员 UID 列表
 	gmHandler := gm.NewHandler(mysqlStore, redisStore, nil, []int64{})
 	router.Register(protocol.MsgID_GMCommandReq, gmHandler.HandleCommand)
