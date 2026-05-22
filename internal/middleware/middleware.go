@@ -13,6 +13,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"strconv"
 	"time"
 
 	"game-server/internal/gateway"
@@ -98,7 +99,7 @@ func RateLimitMiddleware(redis *store.RedisStore, limit int, window time.Duratio
 		}
 
 		// 检查限流
-		key := string(rune(uid)) // 用 uid 作为限流 key
+		key := strconv.FormatInt(uid, 10) // 用 uid 作为限流 key
 		allowed, err := redis.CheckRateLimit(key, limit, window)
 		if err != nil {
 			zap.L().Error("限流检查失败", zap.Int64("uid", uid), zap.Error(err))

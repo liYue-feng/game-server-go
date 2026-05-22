@@ -113,3 +113,15 @@ func (h *Hub) Broadcast(msgID uint16, payload interface{}) {
 		}
 	}
 }
+
+// CloseAllConnections 关闭所有活跃的客户端连接
+// 用于服务器优雅关闭，确保所有连接干净退出
+func (h *Hub) CloseAllConnections() {
+	zap.L().Info("开始关闭所有客户端连接", zap.Int("count", len(h.connections)))
+	// 直接遍历并关闭连接，避免通过 unregister channel 阻塞
+	for conn := range h.connections {
+		close(conn.send)
+		delete(h.connections, conn)
+	}
+	zap.L().Info("所有客户端连接已关闭")
+}

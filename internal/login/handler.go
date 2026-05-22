@@ -174,11 +174,17 @@ func (h *Handler) HandleHeartbeat(conn *gateway.Connection, body json.RawMessage
 
 	// 刷新 Redis 会话过期时间
 	if uid := conn.GetUID(); uid > 0 {
-		_ = h.redis.SetSession(uid, &store.SessionData{
-			Uid:      uid,
-			Nickname: "",
-			Token:    "",
-		})
+		// 先获取现有会话数据（保留原有 nickname 和 token）
+		session, _ := h.redis.GetSession(uid)
+		if session != nil {
+			// 存在会话：刷新 TTL 即可
+			_ = h.redis.SetSession(uid, session)
+		} else {
+			// 不存在会话：创建一个基础会话
+			_ = h.redis.SetSession(uid, &store.SessionData{
+				Uid: uid,
+			})
+		}
 	}
 
 	// 返回服务器时间戳

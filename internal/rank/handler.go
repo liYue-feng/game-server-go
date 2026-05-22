@@ -131,9 +131,13 @@ func (h *Handler) HandleSubmitScore(conn *gateway.Connection, body json.RawMessa
 		zap.Int64("score", req.Score),
 	)
 
+	// 获取玩家昵称用于排行榜显示
+	nickname := strconv.FormatInt(uid, 10) // 默认用 uid
+	if player, err := h.mysql.GetPlayerByID(uid); err == nil {
+		nickname = player.Nickname
+	}
+
 	// 更新 Redis 排行榜
-	// TODO: 获取玩家昵称，这里暂时用 uid 作为标识
-	nickname := strconv.FormatInt(uid, 10)
 	if err := h.redis.UpdateRank(RankType_TopScore, uid, nickname, req.Score); err != nil {
 		zap.L().Error("更新排行榜失败", zap.Error(err))
 	}

@@ -188,11 +188,6 @@ func (h *Handler) handleReloadConfig(args json.RawMessage) (string, error) {
 
 // ========== 协议定义 ==========
 
-const (
-	MsgID_GMCommandReq  uint16 = 6001 // GM指令请求
-	MsgID_GMCommandResp uint16 = 6002 // GM指令响应
-)
-
 // GMCommandReq GM 指令请求
 type GMCommandReq struct {
 	Cmd  string          `json:"cmd"`  // 指令名称：kick / broadcast / query_player / online

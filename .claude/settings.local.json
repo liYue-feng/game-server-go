@@ -44,7 +44,8 @@
       "Bash(F:/goSdk/go1.26.3/bin/go.exe build *)",
       "Bash(F:/Own_project/game-server-go/bin/server.exe)",
       "Bash(taskkill //F //IM server.exe)",
-      "Bash(taskkill //F //IM server)"
+      "Bash(taskkill //F //IM server)",
+      "Bash(git *)"
     ]
   }
 }

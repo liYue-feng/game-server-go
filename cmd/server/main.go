@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -154,8 +155,13 @@ func main() {
 	//   - 与游戏 WebSocket 服务解耦，互不影响
 	callbackMux := http.NewServeMux()
 	callbackMux.HandleFunc("/pay/callback", func(w http.ResponseWriter, r *http.Request) {
-		body := make([]byte, r.ContentLength)
-		r.Body.Read(body)
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			zap.L().Error("读取支付回调请求体失败", zap.Error(err))
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		defer r.Body.Close()
 
 		resp, err := paymentHandler.HandlePayCallback(body)
 		if err != nil {
@@ -200,13 +206,18 @@ func main() {
 		zap.L().Error("回调服务器关闭失败", zap.Error(err))
 	}
 
-	// 7.2 关闭数据存储
+	// 7.2 关闭所有 WebSocket 连接
+	server.Shutdown()
+
+	// 7.3 关闭数据存储
 	if redisStore != nil {
 		redisStore.Close()
 	}
-	mysqlStore.Close()
+	if mysqlStore != nil {
+		mysqlStore.Close()
+	}
 
-	// 7.3 刷新日志
+	// 7.4 刷新日志
 	logger.Sync()
 
 	zap.L().Info("服务器已关闭")

@@ -214,14 +214,6 @@ func generateOrderNo(uid int64, productID int) string {
 	return fmt.Sprintf("%s%06d%03d", now, uid%1000000, productID%1000)
 }
 
-// ========== 消息ID扩展 ==========
-
-const (
-	MsgID_CreateOrderReq  uint16 = 5001 // 创建订单请求
-	MsgID_CreateOrderResp uint16 = 5002 // 创建订单响应
-	MsgID_PayResultNotify uint16 = 5003 // 支付结果通知（服务器主动推送）
-)
-
 // ========== 请求/响应结构体 ==========
 
 // CreateOrderReq 创建订单请求
