@@ -139,6 +139,7 @@ type GetRankReq struct {
 type RankItem struct {
 	Uid      int64  `json:"uid"`      // 用户ID
 	Nickname string `json:"nickname"` // 昵称
+	Level    int    `json:"level"`    // 玩家等级
 	Score    int64  `json:"score"`    // 分数
 	Rank     int    `json:"rank"`     // 排名
 }

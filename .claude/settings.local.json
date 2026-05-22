@@ -45,7 +45,9 @@
       "Bash(F:/Own_project/game-server-go/bin/server.exe)",
       "Bash(taskkill //F //IM server.exe)",
       "Bash(taskkill //F //IM server)",
-      "Bash(git *)"
+      "Bash(git *)",
+      "Bash(dir \"F:\\\\Own_project\\\\game-client-unity\\\\Assets\\\\Scripts\" /s /b)",
+      "Bash(findstr /i \"rank protocol message\")"
     ]
   }
 }

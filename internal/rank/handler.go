@@ -78,9 +78,14 @@ func (h *Handler) HandleGetRank(conn *gateway.Connection, body json.RawMessage) 
 		}
 
 		uid, nickname := parseMember(member)
+		level := 0
+		if stats, err := h.mysql.GetPlayerStats(uid); err == nil {
+			level = stats.Level
+		}
 		ranks = append(ranks, protocol.RankItem{
 			Uid:      uid,
 			Nickname: nickname,
+			Level:    level,
 			Score:    int64(z.Score),
 			Rank:     req.Start + i + 1, // 排名从1开始
 		})
