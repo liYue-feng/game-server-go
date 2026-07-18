@@ -13,6 +13,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -20,11 +21,17 @@ import (
 // Config 顶层配置结构，与 config.yaml 一一对应
 // 每个子结构体对应 YAML 中的一个顶级键
 type Config struct {
-	Server ServerConfig `mapstructure:"server"` // 服务器配置
-	Redis  RedisConfig  `mapstructure:"redis"`  // Redis 配置
-	MySQL  MySQLConfig  `mapstructure:"mysql"`  // MySQL 配置
-	Wechat WechatConfig `mapstructure:"wechat"` // 微信配置
-	Log    LogConfig    `mapstructure:"log"`     // 日志配置
+	Server      ServerConfig      `mapstructure:"server"` // 服务器配置
+	Redis       RedisConfig       `mapstructure:"redis"`  // Redis 配置
+	MySQL       MySQLConfig       `mapstructure:"mysql"`  // MySQL 配置
+	Wechat      WechatConfig      `mapstructure:"wechat"` // 微信配置
+	Log         LogConfig         `mapstructure:"log"`    // 日志配置
+	Development DevelopmentConfig `mapstructure:"development"`
+}
+
+type DevelopmentConfig struct {
+	Enabled      bool `mapstructure:"enabled"`
+	LoginEnabled bool `mapstructure:"login_enabled"`
 }
 
 // ServerConfig 服务器基础配置
@@ -54,11 +61,11 @@ func (r *RedisConfig) Addr() string {
 
 // MySQLConfig MySQL 连接配置
 type MySQLConfig struct {
-	Host         string `mapstructure:"host"`          // MySQL 地址
-	Port         int    `mapstructure:"port"`          // MySQL 端口
-	User         string `mapstructure:"user"`          // 用户名
-	Password     string `mapstructure:"password"`      // 密码
-	DBName       string `mapstructure:"dbname"`        // 数据库名
+	Host         string `mapstructure:"host"`           // MySQL 地址
+	Port         int    `mapstructure:"port"`           // MySQL 端口
+	User         string `mapstructure:"user"`           // 用户名
+	Password     string `mapstructure:"password"`       // 密码
+	DBName       string `mapstructure:"dbname"`         // 数据库名
 	MaxIdleConns int    `mapstructure:"max_idle_conns"` // 空闲连接池最大连接数
 	MaxOpenConns int    `mapstructure:"max_open_conns"` // 最大打开连接数
 }
@@ -80,9 +87,9 @@ type WechatConfig struct {
 type LogConfig struct {
 	Level      string `mapstructure:"level"`       // 日志级别
 	Filename   string `mapstructure:"filename"`    // 日志文件路径
-	MaxSize    int    `mapstructure:"max_size"`     // 单个日志文件最大 MB
-	MaxBackups int    `mapstructure:"max_backups"`  // 保留旧日志文件数量
-	MaxAge     int    `mapstructure:"max_age"`      // 保留旧日志文件天数
+	MaxSize    int    `mapstructure:"max_size"`    // 单个日志文件最大 MB
+	MaxBackups int    `mapstructure:"max_backups"` // 保留旧日志文件数量
+	MaxAge     int    `mapstructure:"max_age"`     // 保留旧日志文件天数
 }
 
 // Load 从指定路径加载配置文件
@@ -102,6 +109,7 @@ func Load(configPath string) (*Config, error) {
 	// 环境变量覆盖：容器部署时通过环境变量注入敏感配置（密码等）
 	// 环境变量前缀 GAME_ ，如 GAME_MYSQL_PASSWORD=xxx 覆盖 mysql.password
 	v.SetEnvPrefix("GAME")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	// 读取配置文件

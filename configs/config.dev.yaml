@@ -1,0 +1,13 @@
+server:
+  host: "127.0.0.1"
+  port: 8080
+  name: "game-server-dev"
+development:
+  enabled: true
+  login_enabled: true
+log:
+  level: "debug"
+  filename: "logs/server-dev.log"
+  max_size: 20
+  max_backups: 2
+  max_age: 7
