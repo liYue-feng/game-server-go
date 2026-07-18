@@ -10,11 +10,12 @@
 //  7. 启动 WebSocket 网关服务器 + HTTP 回调服务器
 //
 // 优雅关闭：
-//  监听系统信号 (SIGINT/SIGTERM)，收到信号后：
-//  1. 停止接收新连接
-//  2. 关闭 HTTP 回调服务器
-//  3. 关闭数据存储连接
-//  4. 刷新日志缓冲
+//
+//	监听系统信号 (SIGINT/SIGTERM)，收到信号后：
+//	1. 停止接收新连接
+//	2. 关闭 HTTP 回调服务器
+//	3. 关闭数据存储连接
+//	4. 刷新日志缓冲
 package main
 
 import (
@@ -31,8 +32,8 @@ import (
 
 	"game-server/internal/combat"
 	"game-server/internal/config"
-	"game-server/internal/gateway"
 	"game-server/internal/game"
+	"game-server/internal/gateway"
 	"game-server/internal/gm"
 	"game-server/internal/login"
 	"game-server/internal/middleware"
@@ -94,11 +95,18 @@ func main() {
 	wechatClient := login.NewWechatClient(&cfg.Wechat)
 
 	// 各模块 Handler
-	loginHandler := login.NewHandler(mysqlStore, redisStore, wechatClient)
-	gameHandler := game.NewHandler(mysqlStore, redisStore)
+	loginService := login.NewLoginService(
+		mysqlStore,
+		redisStore,
+		login.NewWechatCodeExchanger(wechatClient),
+		login.GenerateToken,
+	)
+	loginHandler := login.NewHandler(loginService)
+	archiveService := game.NewArchiveService(mysqlStore)
+	gameHandler := game.NewHandler(archiveService)
 	rankHandler := rank.NewHandler(redisStore, mysqlStore)
 	paymentHandler := payment.NewHandler(mysqlStore, redisStore, &cfg.Wechat)
-		combatHandler := combat.NewHandler(mysqlStore, redisStore)
+	combatHandler := combat.NewHandler(mysqlStore, redisStore)
 
 	// ========== 5. 注册消息路由 ==========
 	router := gateway.NewRouter()
@@ -126,15 +134,15 @@ func main() {
 	router.Register(protocol.MsgID_CreateOrderReq, paymentHandler.HandleCreateOrder)
 
 	// 战斗模块
-		router.Register(protocol.MsgID_CombatResultReq, combatHandler.HandleCombatResult)
-		router.Register(protocol.MsgID_GetEnemyConfigsReq, combatHandler.HandleGetEnemyConfigs)
-		router.Register(protocol.MsgID_GetDungeonConfigReq, combatHandler.HandleGetDungeonConfig)
-		router.Register(protocol.MsgID_GetStyleConfigsReq, combatHandler.HandleGetStyleConfigs)
-		router.Register(protocol.MsgID_UnlockStyleReq, combatHandler.HandleUnlockStyle)
-		router.Register(protocol.MsgID_GetPlayerStatsReq, combatHandler.HandleGetPlayerStats)
-		router.Register(protocol.MsgID_UpdatePlayerStatsReq, combatHandler.HandleUpdatePlayerStats)
+	router.Register(protocol.MsgID_CombatResultReq, combatHandler.HandleCombatResult)
+	router.Register(protocol.MsgID_GetEnemyConfigsReq, combatHandler.HandleGetEnemyConfigs)
+	router.Register(protocol.MsgID_GetDungeonConfigReq, combatHandler.HandleGetDungeonConfig)
+	router.Register(protocol.MsgID_GetStyleConfigsReq, combatHandler.HandleGetStyleConfigs)
+	router.Register(protocol.MsgID_UnlockStyleReq, combatHandler.HandleUnlockStyle)
+	router.Register(protocol.MsgID_GetPlayerStatsReq, combatHandler.HandleGetPlayerStats)
+	router.Register(protocol.MsgID_UpdatePlayerStatsReq, combatHandler.HandleUpdatePlayerStats)
 
-		// GM 指令模块（管理员专用）
+	// GM 指令模块（管理员专用）
 	// TODO: 从配置文件读取管理员 UID 列表
 	gmHandler := gm.NewHandler(mysqlStore, redisStore, nil, []int64{})
 	router.Register(protocol.MsgID_GMCommandReq, gmHandler.HandleCommand)

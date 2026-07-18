@@ -15,23 +15,18 @@ import (
 
 	"game-server/internal/gateway"
 	"game-server/internal/protocol"
-	"game-server/internal/store"
 
 	"go.uber.org/zap"
 )
 
 // Handler 游戏逻辑处理器
 type Handler struct {
-	mysql *store.MySQLStore
-	redis *store.RedisStore
+	service *ArchiveService
 }
 
 // NewHandler 创建游戏逻辑处理器
-func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore) *Handler {
-	return &Handler{
-		mysql: mysql,
-		redis: redis,
-	}
+func NewHandler(service *ArchiveService) *Handler {
+	return &Handler{service: service}
 }
 
 // HandleSaveArchive 处理保存存档请求
@@ -60,13 +55,7 @@ func (h *Handler) HandleSaveArchive(conn *gateway.Connection, body json.RawMessa
 		zap.Int("dataLen", len(req.Data)),
 	)
 
-	// 保存到 MySQL
-	// GORM 的 Save 方法：主键存在则更新，不存在则创建
-	archive := &store.Archive{
-		PlayerID: uid,
-		Data:     req.Data,
-	}
-	if err := h.mysql.SaveArchive(archive); err != nil {
+	if err := h.service.Save(uid, req.Data); err != nil {
 		zap.L().Error("存档保存失败",
 			zap.Int64("uid", uid),
 			zap.Error(err),
@@ -94,22 +83,22 @@ func (h *Handler) HandleSaveArchive(conn *gateway.Connection, body json.RawMessa
 func (h *Handler) HandleLoadArchive(conn *gateway.Connection, body json.RawMessage) {
 	uid := conn.GetUID()
 
-	archive, err := h.mysql.GetArchive(uid)
+	data, err := h.service.Load(uid)
 	if err != nil {
-		// 存档不存在不是错误，说明是新玩家
-		zap.L().Info("存档不存在（新玩家）", zap.Int64("uid", uid))
-		conn.SendMessage(protocol.MsgID_LoadArchiveResp, protocol.LoadArchiveResp{
-			Data: "",
+		zap.L().Error("加载存档失败", zap.Int64("uid", uid), zap.Error(err))
+		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
+			Code: protocol.ErrInternal,
+			Msg:  "加载存档失败",
 		})
 		return
 	}
 
 	conn.SendMessage(protocol.MsgID_LoadArchiveResp, protocol.LoadArchiveResp{
-		Data: archive.Data,
+		Data: data,
 	})
 
 	zap.L().Info("加载存档成功",
 		zap.Int64("uid", uid),
-		zap.Int("dataLen", len(archive.Data)),
+		zap.Int("dataLen", len(data)),
 	)
 }

@@ -17,29 +17,21 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 
 	"game-server/internal/gateway"
 	"game-server/internal/protocol"
-	"game-server/internal/store"
 
 	"go.uber.org/zap"
 )
 
 // Handler 登录处理器
 type Handler struct {
-	mysql *store.MySQLStore
-	redis *store.RedisStore
-	wx    *WechatClient // 微信 API 客户端
+	service *LoginService
 }
 
 // NewHandler 创建登录处理器
-func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore, wx *WechatClient) *Handler {
-	return &Handler{
-		mysql: mysql,
-		redis: redis,
-		wx:    wx,
-	}
+func NewHandler(service *LoginService) *Handler {
+	return &Handler{service: service}
 }
 
 // HandleLogin 处理登录请求
@@ -64,105 +56,34 @@ func (h *Handler) HandleLogin(conn *gateway.Connection, body json.RawMessage) {
 
 	zap.L().Info("收到登录请求", zap.String("code", req.Code))
 
-	// 2. 调用微信 API 获取 openid
-	result, err := h.wx.Code2Session(req.Code)
+	result, err := h.service.Login(req.Code)
 	if err != nil {
-		zap.L().Error("微信登录失败", zap.Error(err))
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrLoginWechatFailed,
-			Msg:  "微信登录失败",
-		})
-		return
-	}
-
-	// 3. 查找或创建玩家
-	player, err := h.mysql.GetPlayerByOpenID(result.OpenID)
-	if err != nil {
-		// 玩家不存在，自动注册
-		player, err = h.registerPlayer(result.OpenID)
-		if err != nil {
-			zap.L().Error("注册玩家失败", zap.Error(err))
-			conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-				Code: protocol.ErrInternal,
-				Msg:  "注册失败",
-			})
-			return
+		code := protocol.ErrInternal
+		message := "登录失败"
+		if isExchangeError(err) {
+			code = protocol.ErrLoginInvalidCode
+			message = "登录凭证无效"
 		}
-		zap.L().Info("新玩家注册", zap.Int64("uid", player.ID))
-	}
-
-	// 4. 生成 token
-	token, err := generateToken()
-	if err != nil {
-		zap.L().Error("生成 token 失败", zap.Error(err))
+		zap.L().Error("登录失败", zap.Error(err))
 		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrInternal,
-			Msg:  "登录失败",
+			Code: code,
+			Msg:  message,
 		})
 		return
 	}
 
-	// 更新 token 到数据库
-	player.Token = token
-	if err := h.mysql.UpdatePlayer(player); err != nil {
-		zap.L().Error("更新 token 失败", zap.Error(err))
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrInternal,
-			Msg:  "登录失败",
-		})
-		return
-	}
+	conn.SetPlayerInfo(result.UID, result.Token)
 
-	// 5. 写入 Redis 会话缓存
-	if err := h.redis.SetSession(player.ID, &store.SessionData{
-		Uid:      player.ID,
-		Nickname: player.Nickname,
-		Token:    token,
-	}); err != nil {
-		// Redis 写入失败不应阻止登录，记录日志即可
-		// 下次请求会走 MySQL 验证
-		zap.L().Error("写入会话缓存失败", zap.Error(err))
-	}
-
-	// 6. 设置连接的玩家信息
-	conn.SetPlayerInfo(player.ID, token)
-
-	// 7. 返回登录成功响应
 	conn.SendMessage(protocol.MsgID_LoginResp, protocol.LoginResp{
-		Uid:      player.ID,
-		Nickname: player.Nickname,
-		Token:    token,
+		Uid:      result.UID,
+		Nickname: result.Nickname,
+		Token:    result.Token,
 	})
 
 	zap.L().Info("玩家登录成功",
-		zap.Int64("uid", player.ID),
-		zap.String("nickname", player.Nickname),
+		zap.Int64("uid", result.UID),
+		zap.String("nickname", result.Nickname),
 	)
-}
-
-// registerPlayer 注册新玩家
-func (h *Handler) registerPlayer(openID string) (*store.Player, error) {
-	// 注意：这里引用了 model.Player，但为了避免循环导入，
-	// 我们直接使用 store 层返回的类型
-	// 实际实现中，model 和 store 应该在同一层
-	player := &store.Player{
-		OpenID:   openID,
-		Nickname: "", // 昵称暂时留空，登录后由客户端设置
-		Token:    "",
-		Level:    1,
-	}
-
-	if err := h.mysql.CreatePlayer(player); err != nil {
-		return nil, fmt.Errorf("创建玩家失败: %w", err)
-	}
-
-	// 设置默认昵称
-	player.Nickname = fmt.Sprintf("玩家%d", player.ID)
-	if err := h.mysql.UpdatePlayer(player); err != nil {
-		return nil, fmt.Errorf("设置昵称失败: %w", err)
-	}
-
-	return player, nil
 }
 
 // HandleHeartbeat 处理心跳请求
@@ -173,18 +94,9 @@ func (h *Handler) HandleHeartbeat(conn *gateway.Connection, body json.RawMessage
 		return // 心跳解析失败不值得发错误响应
 	}
 
-	// 刷新 Redis 会话过期时间
 	if uid := conn.GetUID(); uid > 0 {
-		// 先获取现有会话数据（保留原有 nickname 和 token）
-		session, _ := h.redis.GetSession(uid)
-		if session != nil {
-			// 存在会话：刷新 TTL 即可
-			_ = h.redis.SetSession(uid, session)
-		} else {
-			// 不存在会话：创建一个基础会话
-			_ = h.redis.SetSession(uid, &store.SessionData{
-				Uid: uid,
-			})
+		if err := h.service.RefreshSession(uid); err != nil {
+			zap.L().Error("刷新会话失败", zap.Int64("uid", uid), zap.Error(err))
 		}
 	}
 
@@ -194,12 +106,12 @@ func (h *Handler) HandleHeartbeat(conn *gateway.Connection, body json.RawMessage
 	})
 }
 
-// generateToken 生成随机会话令牌
+// GenerateToken 生成随机会话令牌
 // 使用 crypto/rand 生成 32 字节随机数，比 math/rand 更安全
 // 为什么不用 JWT？JWT 需要密钥管理，且无法主动撤销。
 //
 //	对于游戏服务器，简单的随机 token + Redis 缓存已足够
-func generateToken() (string, error) {
+func GenerateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
