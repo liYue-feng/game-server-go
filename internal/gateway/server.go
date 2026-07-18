@@ -9,14 +9,14 @@ package gateway
 import (
 	"net/http"
 
-	"go.uber.org/zap"
 	"github.com/gorilla/websocket"
+	"go.uber.org/zap"
 )
 
 // Server WebSocket 网关服务器
 type Server struct {
-	hub      *Hub                // 连接管理中心
-	upgrader websocket.Upgrader  // HTTP -> WebSocket 升级器
+	hub      *Hub               // 连接管理中心
+	upgrader websocket.Upgrader // HTTP -> WebSocket 升级器
 }
 
 // NewServer 创建 WebSocket 网关服务器
@@ -44,7 +44,7 @@ func NewServer(router *Router) *Server {
 // 3. 启动 HTTP 服务器（它会自动处理 WebSocket 升级）
 func (s *Server) Start(addr string) error {
 	// 启动 Hub
-	go s.hub.Run()
+	s.hub.Run()
 
 	// 注册 WebSocket 路由
 	// 客户端通过 ws://host:port/ws 连接
@@ -101,4 +101,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 // Hub 返回 Hub 实例（供外部使用，如广播消息）
 func (s *Server) Hub() *Hub {
 	return s.hub
+}
+
+func (s *Server) Shutdown() {
+	s.hub.CloseAllConnections()
 }

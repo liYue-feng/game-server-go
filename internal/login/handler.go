@@ -149,6 +149,7 @@ func (h *Handler) registerPlayer(openID string) (*store.Player, error) {
 		OpenID:   openID,
 		Nickname: "", // 昵称暂时留空，登录后由客户端设置
 		Token:    "",
+		Level:    1,
 	}
 
 	if err := h.mysql.CreatePlayer(player); err != nil {
@@ -196,7 +197,8 @@ func (h *Handler) HandleHeartbeat(conn *gateway.Connection, body json.RawMessage
 // generateToken 生成随机会话令牌
 // 使用 crypto/rand 生成 32 字节随机数，比 math/rand 更安全
 // 为什么不用 JWT？JWT 需要密钥管理，且无法主动撤销。
-//   对于游戏服务器，简单的随机 token + Redis 缓存已足够
+//
+//	对于游戏服务器，简单的随机 token + Redis 缓存已足够
 func generateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

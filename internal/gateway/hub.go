@@ -11,10 +11,22 @@
 package gateway
 
 import (
+	"sync"
+
 	"game-server/internal/protocol"
 
 	"go.uber.org/zap"
 )
+
+type registerRequest struct {
+	conn *Connection
+	done chan struct{}
+}
+
+type broadcastRequest struct {
+	data []byte
+	done chan struct{}
+}
 
 // Hub 管理所有活跃的客户端连接
 type Hub struct {
@@ -24,11 +36,18 @@ type Hub struct {
 
 	// 注册请求 channel
 	// 新连接建立时，通过此 channel 通知 Hub
-	register chan *Connection
+	register chan registerRequest
 
 	// 注销请求 channel
 	// 连接断开时，通过此 channel 通知 Hub
-	unregister chan *Connection
+	unregister chan registerRequest
+
+	closeAll    chan chan struct{}
+	broadcast   chan broadcastRequest
+	onlineCount chan chan int
+	stopped     chan struct{}
+	loopDone    chan struct{}
+	loopOnce    sync.Once
 
 	// 消息路由器
 	router *Router
@@ -38,9 +57,14 @@ type Hub struct {
 func NewHub(router *Router) *Hub {
 	return &Hub{
 		connections: make(map[*Connection]struct{}),
-		register:   make(chan *Connection),
-		unregister: make(chan *Connection),
-		router:     router,
+		register:    make(chan registerRequest),
+		unregister:  make(chan registerRequest),
+		closeAll:    make(chan chan struct{}),
+		broadcast:   make(chan broadcastRequest),
+		onlineCount: make(chan chan int),
+		stopped:     make(chan struct{}),
+		loopDone:    make(chan struct{}),
+		router:      router,
 	}
 }
 
@@ -49,27 +73,56 @@ func NewHub(router *Router) *Hub {
 //
 //	go hub.Run()
 func (h *Hub) Run() {
+	h.loopOnce.Do(func() {
+		go h.run()
+	})
+}
+
+func (h *Hub) run() {
 	zap.L().Info("Hub 启动")
 	for {
 		select {
-		case conn := <-h.register:
+		case req := <-h.register:
 			// 新连接加入
-			h.connections[conn] = struct{}{}
-			zap.L().Info("新连接加入",
-				zap.Int("total", len(h.connections)),
-			)
+			h.connections[req.conn] = struct{}{}
+			zap.L().Info("新连接加入", zap.Int("total", len(h.connections)))
+			close(req.done)
 
-		case conn := <-h.unregister:
+		case req := <-h.unregister:
 			// 连接断开，清理资源
-			if _, ok := h.connections[conn]; ok {
-				delete(h.connections, conn)
+			if _, ok := h.connections[req.conn]; ok {
+				delete(h.connections, req.conn)
 				// 关闭 send 通道，通知 writePump 退出
-				close(conn.send)
+				req.conn.closeSend()
 				zap.L().Info("连接断开",
-					zap.Int64("uid", conn.GetUID()),
+					zap.Int64("uid", req.conn.GetUID()),
 					zap.Int("total", len(h.connections)),
 				)
 			}
+			close(req.done)
+
+		case done := <-h.closeAll:
+			zap.L().Info("开始关闭所有客户端连接", zap.Int("count", len(h.connections)))
+			for conn := range h.connections {
+				conn.closeSend()
+				delete(h.connections, conn)
+			}
+			zap.L().Info("所有客户端连接已关闭")
+			close(h.stopped)
+			close(h.loopDone)
+			close(done)
+			return
+
+		case req := <-h.broadcast:
+			for conn := range h.connections {
+				if !conn.enqueue(req.data) {
+					zap.L().Warn("广播跳过：发送缓冲区已满", zap.Int64("uid", conn.GetUID()))
+				}
+			}
+			close(req.done)
+
+		case response := <-h.onlineCount:
+			response <- len(h.connections)
 		}
 	}
 }
@@ -77,19 +130,53 @@ func (h *Hub) Run() {
 // Register 注册一个新连接
 // 线程安全：通过 channel 传递，Hub 在自己的 goroutine 中处理
 func (h *Hub) Register(conn *Connection) {
-	h.register <- conn
+	h.Run()
+	done := make(chan struct{})
+	select {
+	case <-h.stopped:
+		conn.closeSend()
+		return
+	case h.register <- registerRequest{conn: conn, done: done}:
+	}
+	select {
+	case <-done:
+	case <-h.stopped:
+		conn.closeSend()
+	}
 }
 
 // Unregister 注销一个连接
 func (h *Hub) Unregister(conn *Connection) {
-	h.unregister <- conn
+	h.Run()
+	done := make(chan struct{})
+	select {
+	case <-h.stopped:
+		conn.closeSend()
+		return
+	case h.unregister <- registerRequest{conn: conn, done: done}:
+	}
+	select {
+	case <-done:
+	case <-h.stopped:
+		conn.closeSend()
+	}
 }
 
 // OnlineCount 返回当前在线连接数
-// 注意：此方法直接读取 map，在 Hub goroutine 之外调用可能存在竞态
-// 如果需要精确计数，应通过 channel 请求 Hub 返回
 func (h *Hub) OnlineCount() int {
-	return len(h.connections)
+	h.Run()
+	response := make(chan int)
+	select {
+	case <-h.stopped:
+		return 0
+	case h.onlineCount <- response:
+	}
+	select {
+	case count := <-response:
+		return count
+	case <-h.stopped:
+		return 0
+	}
 }
 
 // Broadcast 向所有在线连接广播消息
@@ -101,27 +188,28 @@ func (h *Hub) Broadcast(msgID uint16, payload interface{}) {
 		return
 	}
 
-	for conn := range h.connections {
-		select {
-		case conn.send <- data:
-		default:
-			// 发送缓冲区满，跳过此连接
-			// 广播消息的重要性通常低于单播，不应因某个客户端卡住而影响其他客户端
-			zap.L().Warn("广播跳过：发送缓冲区已满",
-				zap.Int64("uid", conn.GetUID()),
-			)
-		}
+	h.Run()
+	done := make(chan struct{})
+	select {
+	case <-h.stopped:
+		return
+	case h.broadcast <- broadcastRequest{data: data, done: done}:
+	}
+	select {
+	case <-done:
+	case <-h.stopped:
 	}
 }
 
 // CloseAllConnections 关闭所有活跃的客户端连接
 // 用于服务器优雅关闭，确保所有连接干净退出
 func (h *Hub) CloseAllConnections() {
-	zap.L().Info("开始关闭所有客户端连接", zap.Int("count", len(h.connections)))
-	// 直接遍历并关闭连接，避免通过 unregister channel 阻塞
-	for conn := range h.connections {
-		close(conn.send)
-		delete(h.connections, conn)
+	h.Run()
+	done := make(chan struct{})
+	select {
+	case <-h.stopped:
+		return
+	case h.closeAll <- done:
 	}
-	zap.L().Info("所有客户端连接已关闭")
+	<-done
 }

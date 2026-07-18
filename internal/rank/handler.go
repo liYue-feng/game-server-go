@@ -6,8 +6,9 @@
 //   - ZREVRANGE 按分数从高到低排序，ZREVRANK 查询指定玩家排名
 //
 // 数据流：
-//   提交分数 -> 更新 Redis ZSET + 写入 MySQL -> 返回排名信息
-//   查询排行榜 -> 从 Redis ZSET 读取 -> 返回排名列表
+//
+//	提交分数 -> 更新 Redis ZSET + 写入 MySQL -> 返回排名信息
+//	查询排行榜 -> 从 Redis ZSET 读取 -> 返回排名列表
 package rank
 
 import (
@@ -78,9 +79,9 @@ func (h *Handler) HandleGetRank(conn *gateway.Connection, body json.RawMessage) 
 		}
 
 		uid, nickname := parseMember(member)
-		level := 0
-		if stats, err := h.mysql.GetPlayerStats(uid); err == nil {
-			level = stats.Level
+		level := 1
+		if player, err := h.mysql.GetPlayerByID(uid); err == nil {
+			level = player.EffectiveLevel()
 		}
 		ranks = append(ranks, protocol.RankItem{
 			Uid:      uid,

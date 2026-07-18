@@ -45,14 +45,16 @@ const (
 // 这种读写分离的模式是 gorilla/websocket 推荐的做法，
 // 原因：一个 WebSocket 连接同一时刻只允许一个写操作，多个 goroutine 并发写会 panic
 type Connection struct {
-	hub  *Hub            // 所属的连接管理中心
-	conn *websocket.Conn // 底层 WebSocket 连接
-	send chan []byte     // 发送缓冲区，writePump 从这里取数据发送
+	hub        *Hub            // 所属的连接管理中心
+	conn       *websocket.Conn // 底层 WebSocket 连接
+	send       chan []byte     // 发送缓冲区，writePump 从这里取数据发送
+	sendMu     sync.RWMutex
+	sendClosed bool
 
 	// 玩家信息，登录成功后设置
-	mu     sync.RWMutex
-	uid    int64  // 已登录的玩家 ID，0 表示未登录
-	token  string // 会话令牌
+	mu    sync.RWMutex
+	uid   int64  // 已登录的玩家 ID，0 表示未登录
+	token string // 会话令牌
 }
 
 // newConnection 创建一个新的连接实例
@@ -94,16 +96,43 @@ func (c *Connection) SendMessage(msgID uint16, payload interface{}) error {
 
 	// 非阻塞发送：如果缓冲区满了，说明客户端处理不过来，丢弃消息
 	// 为什么丢弃而不是阻塞？因为阻塞会导致服务器 goroutine 堆积，可能拖垮整个服务
-	select {
-	case c.send <- data:
-		return nil
-	default:
+	if !c.enqueue(data) {
 		zap.L().Warn("发送缓冲区已满，丢弃消息",
 			zap.Int64("uid", c.GetUID()),
 			zap.Uint16("msgID", msgID),
 		)
-		return nil
 	}
+	return nil
+}
+
+func (c *Connection) enqueue(data []byte) bool {
+	return c.withSendLock(func() bool {
+		if c.sendClosed {
+			return false
+		}
+		select {
+		case c.send <- data:
+			return true
+		default:
+			return false
+		}
+	})
+}
+
+func (c *Connection) withSendLock(fn func() bool) bool {
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	return fn()
+}
+
+func (c *Connection) closeSend() {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return
+	}
+	c.sendClosed = true
+	close(c.send)
 }
 
 // readPump 读取泵 —— 从 WebSocket 读取客户端消息
