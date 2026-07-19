@@ -40,8 +40,8 @@ type MiddlewareFunc func(conn *Connection, body json.RawMessage, next HandlerFun
 
 // Router 消息路由器
 type Router struct {
-	handlers    map[uint16]HandlerFunc    // MsgID -> Handler 的映射表
-	middlewares []MiddlewareFunc          // 全局中间件链
+	handlers    map[uint16]HandlerFunc // MsgID -> Handler 的映射表
+	middlewares []MiddlewareFunc       // 全局中间件链
 }
 
 // NewRouter 创建一个新的路由器
@@ -80,6 +80,12 @@ func (r *Router) Register(msgID uint16, handler HandlerFunc) {
 	}
 	r.handlers[msgID] = handler
 	zap.L().Info("注册消息处理器", zap.Uint16("msgID", msgID))
+}
+
+// HasHandler reports whether a message has a registered route.
+func (r *Router) HasHandler(msgID uint16) bool {
+	_, ok := r.handlers[msgID]
+	return ok
 }
 
 // Route 将消息路由到对应的 handler
