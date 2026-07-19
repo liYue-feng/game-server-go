@@ -2,10 +2,14 @@ package login
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
-var ErrDevelopmentCodeRejected = errors.New("development login code rejected")
+var (
+	ErrInvalidLoginCode        = errors.New("invalid login code")
+	ErrDevelopmentCodeRejected = fmt.Errorf("%w: development login code rejected", ErrInvalidLoginCode)
+)
 
 type LoginIdentity struct{ OpenID string }
 

@@ -17,6 +17,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 
 	"game-server/internal/gateway"
 	"game-server/internal/protocol"
@@ -58,12 +59,7 @@ func (h *Handler) HandleLogin(conn *gateway.Connection, body json.RawMessage) {
 
 	result, err := h.service.Login(req.Code)
 	if err != nil {
-		code := protocol.ErrInternal
-		message := "登录失败"
-		if isExchangeError(err) {
-			code = protocol.ErrLoginInvalidCode
-			message = "登录凭证无效"
-		}
+		code, message := classifyLoginError(err)
 		zap.L().Error("登录失败", zap.Error(err))
 		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
 			Code: code,
@@ -84,6 +80,16 @@ func (h *Handler) HandleLogin(conn *gateway.Connection, body json.RawMessage) {
 		zap.Int64("uid", result.UID),
 		zap.String("nickname", result.Nickname),
 	)
+}
+
+func classifyLoginError(err error) (int, string) {
+	if errors.Is(err, ErrInvalidLoginCode) {
+		return protocol.ErrLoginInvalidCode, "登录凭证无效"
+	}
+	if isExchangeError(err) {
+		return protocol.ErrLoginWechatFailed, "微信登录服务失败"
+	}
+	return protocol.ErrInternal, "登录失败"
 }
 
 // HandleHeartbeat 处理心跳请求

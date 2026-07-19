@@ -44,11 +44,9 @@ func AuthMiddleware(redis *store.RedisStore) MiddlewareFunc {
 	return func(conn *gateway.Connection, body json.RawMessage, next gateway.HandlerFunc) {
 		uid := conn.GetUID()
 		if uid <= 0 {
-			// 未登录，不应该走到这里（Router 已拦截）
-			conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-				Code: protocol.ErrUnauthorized,
-				Msg:  "请先登录",
-			})
+			// Router owns unauthenticated route authorization. Login and heartbeat
+			// are explicitly allowed through the global middleware chain.
+			next(conn, body)
 			return
 		}
 

@@ -16,7 +16,7 @@ mysql:
   host: "127.0.0.1"
   port: 3306
   user: "root"
-  password: "123456"
+  password: ""
   dbname: "game_db"  # 数据库名
   max_idle_conns: 10 # 空闲连接池中的最大连接数
   max_open_conns: 100 # 数据库的最大打开连接数

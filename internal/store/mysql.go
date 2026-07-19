@@ -15,16 +15,17 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
 )
 
 // 重新导出 model 类型，业务层只需 import store 即可使用
 // 避免业务层同时依赖 store 和 model 两个包
 type (
-	Player        = model.Player
-	Archive       = model.Archive
-	ScoreRecord   = model.ScoreRecord
-	PaymentOrder  = model.PaymentOrder
+	Player       = model.Player
+	Archive      = model.Archive
+	ScoreRecord  = model.ScoreRecord
+	PaymentOrder = model.PaymentOrder
 )
 
 // MySQLStore MySQL 数据存储
@@ -130,9 +131,15 @@ func (s *MySQLStore) GetArchive(playerID int64) (*model.Archive, error) {
 }
 
 // SaveArchive 保存或更新存档
-// 使用 GORM 的 Save 方法：主键存在则更新，不存在则创建
 func (s *MySQLStore) SaveArchive(archive *model.Archive) error {
-	return s.db.Save(archive).Error
+	return saveArchiveQuery(s.db, archive).Error
+}
+
+func saveArchiveQuery(db *gorm.DB, archive *model.Archive) *gorm.DB {
+	return db.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "player_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"data", "updated_at"}),
+	}).Create(archive)
 }
 
 // ========== 分数相关操作 ==========
