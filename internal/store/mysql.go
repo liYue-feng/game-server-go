@@ -25,12 +25,13 @@ import (
 // 重新导出 model 类型，业务层只需 import store 即可使用
 // 避免业务层同时依赖 store 和 model 两个包
 type (
-	Player       = model.Player
-	Archive      = model.Archive
-	ScoreRecord  = model.ScoreRecord
-	PaymentOrder = model.PaymentOrder
-	PlayerStats  = model.PlayerStats
-	PlayerStyle  = model.PlayerStyle
+	Player           = model.Player
+	Archive          = model.Archive
+	ScoreRecord      = model.ScoreRecord
+	PaymentOrder     = model.PaymentOrder
+	PlayerStats      = model.PlayerStats
+	PlayerStyle      = model.PlayerStyle
+	CombatSettlement = model.CombatSettlement
 )
 
 // MySQLStore MySQL 数据存储
@@ -69,7 +70,7 @@ func NewMySQLStore(cfg *config.MySQLConfig) (*MySQLStore, error) {
 	// 生产环境建议使用独立的 migration 工具（如 golang-migrate）
 	if err := validateAndCloseOnFailure(
 		func() error {
-			return db.AutoMigrate(&model.Player{}, &model.Archive{}, &model.ScoreRecord{}, &model.PaymentOrder{}, &model.PlayerStats{}, &model.PlayerStyle{})
+			return db.AutoMigrate(&model.Player{}, &model.Archive{}, &model.ScoreRecord{}, &model.PaymentOrder{}, &model.PlayerStats{}, &model.PlayerStyle{}, &model.CombatSettlement{})
 		},
 		sqlDB.Close,
 	); err != nil {

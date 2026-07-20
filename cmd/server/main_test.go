@@ -148,6 +148,8 @@ func TestNewRuntimeDevelopmentRegistersOnlyOnlineSessionMessages(t *testing.T) {
 		protocol.MsgID_HeartbeatReq,
 		protocol.MsgID_SaveArchiveReq,
 		protocol.MsgID_LoadArchiveReq,
+		protocol.MsgID_CombatResultReq,
+		protocol.MsgID_GetPlayerStatsReq,
 	}
 	for _, msgID := range present {
 		if !appRuntime.kernel.HasHandler(msgID) {
@@ -159,12 +161,10 @@ func TestNewRuntimeDevelopmentRegistersOnlyOnlineSessionMessages(t *testing.T) {
 		protocol.MsgID_GetRankReq,
 		protocol.MsgID_SubmitScoreReq,
 		protocol.MsgID_CreateOrderReq,
-		protocol.MsgID_CombatResultReq,
 		protocol.MsgID_GetEnemyConfigsReq,
 		protocol.MsgID_GetDungeonConfigReq,
 		protocol.MsgID_GetStyleConfigsReq,
 		protocol.MsgID_UnlockStyleReq,
-		protocol.MsgID_GetPlayerStatsReq,
 		protocol.MsgID_UpdatePlayerStatsReq,
 		protocol.MsgID_GMCommandReq,
 	}
@@ -218,6 +218,46 @@ func TestNewRuntimeDevelopmentInstallsAuthenticationHook(t *testing.T) {
 	if response.Code != int32(protocol.ErrUnauthorized) {
 		t.Fatalf("error code = %d, want %d", response.Code, protocol.ErrUnauthorized)
 	}
+}
+
+func TestNewRuntimeDevelopmentRoutesSettlementLevelToStats(t *testing.T) {
+	appRuntime, err := newRuntime(&config.Config{Development: config.DevelopmentConfig{Enabled: true, LoginEnabled: true}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = appRuntime.close() })
+	conn := &runtimeCaptureConn{}
+	ctx := session.WithSession(context.Background(), session.New(conn))
+	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_LoginReq, &protocolpb.LoginReq{Code: "dev:level-route"})
+	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_CombatResultReq, &protocolpb.CombatResultReq{RunId: "route-level-2", DungeonLevel: 2, Score: 10, Kills: 1, DurationMs: 1_000, StyleId: 1, Outcome: protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY, PlayerLevel: 2})
+	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_CombatResultReq, &protocolpb.CombatResultReq{RunId: "route-level-1", DungeonLevel: 2, Score: 10, Kills: 1, DurationMs: 1_000, StyleId: 1, Outcome: protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY, PlayerLevel: 1})
+	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_GetPlayerStatsReq, &protocolpb.GetPlayerStatsReq{})
+	if len(conn.frames) != 4 {
+		t.Fatalf("response frames = %d, want 4", len(conn.frames))
+	}
+	message, err := protocol.Decode(conn.frames[3])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.MsgID != protocol.MsgID_GetPlayerStatsResp {
+		t.Fatalf("response ID = %d", message.MsgID)
+	}
+	stats := &protocolpb.GetPlayerStatsResp{}
+	if err := proto.Unmarshal(message.Body, stats); err != nil {
+		t.Fatal(err)
+	}
+	if stats.Level != 2 {
+		t.Fatalf("stats level = %d, want 2", stats.Level)
+	}
+}
+
+func dispatchRuntimeRequest(t *testing.T, appRuntime *runtime, ctx context.Context, id uint16, request proto.Message) {
+	t.Helper()
+	frame, err := protocol.Encode(id, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appRuntime.kernel.Dispatch(ctx, frame)
 }
 
 func TestNewRuntimeProductionFailsBeforeServingWhenMySQLIsUnavailable(t *testing.T) {

@@ -3,7 +3,16 @@ package store
 import (
 	"fmt"
 	"sync"
+
+	"game-server/internal/protocolpb"
+
+	"google.golang.org/protobuf/proto"
 )
+
+type memorySettlementKey struct {
+	playerID int64
+	runID    string
+}
 
 type MemoryDevelopmentStore struct {
 	mu               sync.RWMutex
@@ -12,15 +21,28 @@ type MemoryDevelopmentStore struct {
 	playerIDByOpenID map[string]int64
 	sessionsByUID    map[int64]SessionData
 	archivesByUID    map[int64]Archive
+	settlementPolicy CombatRewardPolicy
+	settlements      map[memorySettlementKey][]byte
+	playerLevels     map[int64]int32
 }
 
 func NewMemoryDevelopmentStore() *MemoryDevelopmentStore {
+	return NewMemoryDevelopmentStoreWithSettlementPolicy(CombatRewardPolicy{})
+}
+
+func NewMemoryDevelopmentStoreWithSettlementPolicy(policy CombatRewardPolicy) *MemoryDevelopmentStore {
+	if err := validateCombatRewardPolicy(policy); err != nil {
+		panic(err)
+	}
 	return &MemoryDevelopmentStore{
 		nextPlayerID:     1,
 		playersByID:      make(map[int64]Player),
 		playerIDByOpenID: make(map[string]int64),
 		sessionsByUID:    make(map[int64]SessionData),
 		archivesByUID:    make(map[int64]Archive),
+		settlementPolicy: policy,
+		settlements:      make(map[memorySettlementKey][]byte),
+		playerLevels:     make(map[int64]int32),
 	}
 }
 
@@ -153,8 +175,65 @@ func (s *MemoryDevelopmentStore) SaveArchive(archive *Archive) error {
 	return nil
 }
 
+// Settle applies all changes and stores the first protobuf response under one mutex.
+func (s *MemoryDevelopmentStore) Settle(playerID int64, req *protocolpb.CombatResultReq) (*protocolpb.CombatResultResp, error) {
+	if req == nil {
+		return nil, fmt.Errorf("settle combat: nil request")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	key := memorySettlementKey{playerID: playerID, runID: req.RunId}
+	if stored, found := s.settlements[key]; found {
+		response := &protocolpb.CombatResultResp{}
+		if err := proto.Unmarshal(stored, response); err != nil {
+			return nil, fmt.Errorf("decode stored settlement: %w", err)
+		}
+		response.Duplicate = true
+		return response, nil
+	}
+
+	archive := &protocolpb.PlayerArchive{SchemaVersion: 1}
+	if stored, found := s.archivesByUID[playerID]; found {
+		if err := proto.Unmarshal(stored.Data, archive); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrMalformedSettlementArchive, err)
+		}
+	}
+	response, err := settleArchive(archive, req, s.settlementPolicy)
+	if err != nil {
+		return nil, err
+	}
+	archiveData, err := proto.Marshal(response.Archive)
+	if err != nil {
+		return nil, fmt.Errorf("encode settlement archive: %w", err)
+	}
+	responseData, err := proto.Marshal(response)
+	if err != nil {
+		return nil, fmt.Errorf("encode settlement response: %w", err)
+	}
+
+	s.archivesByUID[playerID] = Archive{PlayerID: playerID, Data: archiveData}
+	if req.PlayerLevel > s.playerLevels[playerID] {
+		s.playerLevels[playerID] = req.PlayerLevel
+	}
+	s.settlements[key] = responseData
+	return response, nil
+}
+
+func (s *MemoryDevelopmentStore) GetDevelopmentPlayerLevel(playerID int64) (int32, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if level := s.playerLevels[playerID]; level > 0 {
+		return level, nil
+	}
+	return 1, nil
+}
+
 var (
-	_ PlayerRepository  = (*MemoryDevelopmentStore)(nil)
-	_ SessionRepository = (*MemoryDevelopmentStore)(nil)
-	_ ArchiveRepository = (*MemoryDevelopmentStore)(nil)
+	_ PlayerRepository                 = (*MemoryDevelopmentStore)(nil)
+	_ SessionRepository                = (*MemoryDevelopmentStore)(nil)
+	_ ArchiveRepository                = (*MemoryDevelopmentStore)(nil)
+	_ CombatSettlementRepository       = (*MemoryDevelopmentStore)(nil)
+	_ DevelopmentPlayerStatsRepository = (*MemoryDevelopmentStore)(nil)
 )

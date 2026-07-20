@@ -73,7 +73,11 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 	k := kernel.New(hookChain)
 
 	if cfg.Development.Enabled {
-		memoryStore := store.NewMemoryDevelopmentStore()
+		combatConfig := combat.DefaultCombatConfig()
+		memoryStore := store.NewMemoryDevelopmentStoreWithSettlementPolicy(store.CombatRewardPolicy{
+			GoldPerKill: combatConfig.GoldPerKill,
+			ExpPerKill:  combatConfig.ExpPerKill,
+		})
 		loginService := login.NewLoginService(
 			memoryStore,
 			memoryStore,
@@ -82,8 +86,11 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 		)
 		loginHandler := login.NewHandlerWithService(loginService)
 		gameHandler := game.NewHandlerWithService(game.NewArchiveService(memoryStore))
+		combatHandler := combat.NewDevelopmentHandler(combat.NewSettlementService(memoryStore, combatConfig), memoryStore, memoryStore)
 
 		registerOnlineSessionHandlers(k, loginHandler, gameHandler)
+		k.RegisterRoute(protocol.MsgID_CombatResultReq, combatHandler.CombatResult)
+		k.RegisterRoute(protocol.MsgID_GetPlayerStatsReq, combatHandler.GetPlayerStats)
 		hookChain.AddBefore(hooks.Auth(memoryStore, k))
 
 		server := transport.NewServer(k)

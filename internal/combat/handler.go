@@ -19,23 +19,54 @@ import (
 	"game-server/internal/store"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/gorm"
 )
 
 // Handler 战斗模块处理器（组件）。
 type Handler struct {
-	mysql *store.MySQLStore
-	redis *store.RedisStore
-	cfg   *CombatConfig
+	mysql      *store.MySQLStore
+	redis      *store.RedisStore
+	cfg        *CombatConfig
+	settlement *SettlementService
+	archives   store.ArchiveRepository
+	stats      store.DevelopmentPlayerStatsRepository
 }
 
 // NewHandler 创建战斗模块处理器。
 func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore) *Handler {
-	return &Handler{mysql: mysql, redis: redis, cfg: DefaultCombatConfig()}
+	cfg := DefaultCombatConfig()
+	return &Handler{
+		mysql:      mysql,
+		redis:      redis,
+		cfg:        cfg,
+		settlement: NewSettlementService(store.NewMySQLCombatSettlementRepository(mysql, settlementRewardPolicy(cfg)), cfg),
+		archives:   mysql,
+	}
+}
+
+// NewDevelopmentHandler exposes only settlement and stats over an in-memory store.
+func NewDevelopmentHandler(settlement *SettlementService, archives store.ArchiveRepository, stats store.DevelopmentPlayerStatsRepository) *Handler {
+	return &Handler{cfg: DefaultCombatConfig(), settlement: settlement, archives: archives, stats: stats}
 }
 
 // CombatResult 处理战斗结算请求：反作弊校验 -> 计算奖励 -> 持久化 -> 同步排行榜。
 func (h *Handler) CombatResult(ctx context.Context, req *protocolpb.CombatResultReq) (*protocolpb.CombatResultResp, error) {
+	if err := validateCombatResult(req, h.cfg); err != nil {
+		return nil, protocol.NewBizError(protocol.ErrCombatCheatDetected, err.Error())
+	}
+	if h.settlement != nil {
+		response, err := h.settlement.Settle(uidFromCtx(ctx), req)
+		if err != nil {
+			return nil, protocol.NewBizError(protocol.ErrInternal, "combat settlement failed")
+		}
+		if !response.Duplicate && h.redis != nil {
+			if err := h.redis.UpdateRank(1, uidFromCtx(ctx), strconv.FormatInt(uidFromCtx(ctx), 10), req.Score); err != nil {
+				zap.L().Error("同步排行榜失败", zap.Int64("uid", uidFromCtx(ctx)), zap.Error(err))
+			}
+		}
+		return response, nil
+	}
 	// 基础反作弊校验
 	if err := validateCombatResult(req, h.cfg); err != nil {
 		return nil, protocol.NewBizError(protocol.ErrCombatCheatDetected, err.Error())
@@ -192,6 +223,9 @@ func (h *Handler) UnlockStyle(ctx context.Context, req *protocolpb.UnlockStyleRe
 
 // GetPlayerStats 获取玩家战斗属性；新玩家返回默认值并自动创建记录。
 func (h *Handler) GetPlayerStats(ctx context.Context, req *protocolpb.GetPlayerStatsReq) (*protocolpb.GetPlayerStatsResp, error) {
+	if h.mysql == nil {
+		return h.getDevelopmentPlayerStats(uidFromCtx(ctx))
+	}
 	uid := uidFromCtx(ctx)
 
 	stats, err := h.mysql.GetPlayerStats(uid)
@@ -224,6 +258,38 @@ func (h *Handler) GetPlayerStats(ctx context.Context, req *protocolpb.GetPlayerS
 		MaxStamina:     int32(stats.MaxStamina),
 		AttackPower:    int32(stats.AttackPower),
 		UnlockedStyles: unlockedStyleIDs,
+	}, nil
+}
+
+func (h *Handler) getDevelopmentPlayerStats(uid int64) (*protocolpb.GetPlayerStatsResp, error) {
+	level := int32(1)
+	if h.stats != nil {
+		var err error
+		level, err = h.stats.GetDevelopmentPlayerLevel(uid)
+		if err != nil {
+			return nil, protocol.NewBizError(protocol.ErrInternal, "load development stats failed")
+		}
+	}
+	archive := &protocolpb.PlayerArchive{SchemaVersion: 1, UnlockedStyles: []int32{1}}
+	if h.archives != nil {
+		stored, err := h.archives.GetArchive(uid)
+		if err != nil && !store.IsNotFound(err) {
+			return nil, protocol.NewBizError(protocol.ErrInternal, "load development stats failed")
+		}
+		if err == nil {
+			if err := proto.Unmarshal(stored.Data, archive); err != nil {
+				return nil, protocol.NewBizError(protocol.ErrInternal, "decode development stats failed")
+			}
+		}
+	}
+	return &protocolpb.GetPlayerStatsResp{
+		Level:          level,
+		Exp:            archive.Exp,
+		Gold:           archive.Gold,
+		MaxHp:          int32(h.cfg.MaxHp),
+		MaxStamina:     int32(h.cfg.MaxStamina),
+		AttackPower:    int32(h.cfg.BaseAttackPower),
+		UnlockedStyles: append([]int32(nil), archive.UnlockedStyles...),
 	}, nil
 }
 

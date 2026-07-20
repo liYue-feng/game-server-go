@@ -3,6 +3,8 @@ package store
 import (
 	"errors"
 
+	"game-server/internal/protocolpb"
+
 	"gorm.io/gorm"
 )
 
@@ -28,6 +30,21 @@ type SessionRepository interface {
 type ArchiveRepository interface {
 	GetArchive(int64) (*Archive, error)
 	SaveArchive(*Archive) error
+}
+
+// CombatRewardPolicy is fixed when a settlement repository is constructed.
+type CombatRewardPolicy struct {
+	GoldPerKill int
+	ExpPerKill  int
+}
+
+// CombatSettlementRepository atomically settles one player run by its run ID.
+type CombatSettlementRepository interface {
+	Settle(int64, *protocolpb.CombatResultReq) (*protocolpb.CombatResultResp, error)
+}
+
+type DevelopmentPlayerStatsRepository interface {
+	GetDevelopmentPlayerLevel(int64) (int32, error)
 }
 
 var (

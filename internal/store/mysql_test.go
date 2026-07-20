@@ -9,6 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"game-server/internal/protocolpb"
+
+	"github.com/DATA-DOG/go-sqlmock"
+	drivermysql "github.com/go-sql-driver/mysql"
+	"google.golang.org/protobuf/proto"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
@@ -25,6 +30,64 @@ func TestUnparameterizedGORMLoggerInterpolatesSensitiveValues(t *testing.T) {
 
 	if !strings.Contains(queryLog.String(), secret) {
 		t.Fatalf("unparameterized GORM log = %q, want proof that sensitive value is interpolated", queryLog.String())
+	}
+}
+
+func TestMySQLSettlementDuplicateConflictRollsBackAndReturnsStoredSnapshot(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+	repository := NewMySQLCombatSettlementRepository(&MySQLStore{db: db}, CombatRewardPolicy{GoldPerKill: 5, ExpPerKill: 10})
+	req := settlementRequest("duplicate-mysql-run", protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY)
+	stored := &protocolpb.CombatResultResp{
+		Success: true, RewardGold: 20, RewardExp: 40, BestScore: 321,
+		Archive: &protocolpb.PlayerArchive{SchemaVersion: 1, Gold: 20, Exp: 40, BestScore: 321, TotalKills: 4, TotalGames: 1, HighestClearedDungeon: 3, LastStyleId: 3},
+	}
+	storedBytes, err := proto.Marshal(stored)
+	if err != nil {
+		t.Fatalf("marshal stored response: %v", err)
+	}
+
+	mock.ExpectBegin()
+	// This first business query must retain FOR UPDATE; without it, the same
+	// player's different runs can interleave under READ COMMITTED.
+	mock.ExpectQuery("SELECT \\* FROM `players`.*FOR UPDATE").
+		WithArgs(int64(21), 1).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21))
+	mock.ExpectQuery("SELECT \\* FROM `combat_settlements`").
+		WithArgs(int64(21), req.RunId, 1).WillReturnRows(sqlmock.NewRows([]string{"id", "player_id", "run_id", "response", "created_at"}))
+	mock.ExpectQuery("SELECT \\* FROM `archives`").
+		WithArgs(int64(21), 1).WillReturnRows(sqlmock.NewRows([]string{"id", "player_id", "data", "created_at", "updated_at"}))
+	mock.ExpectQuery("SELECT \\* FROM `player_stats`").
+		WithArgs(int64(21), 1).WillReturnRows(sqlmock.NewRows([]string{"id", "player_id"}))
+	mock.ExpectExec("INSERT INTO `player_stats`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO `score_records`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO `archives`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO `combat_settlements`").WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "duplicate"})
+	mock.ExpectRollback()
+	mock.ExpectQuery("SELECT \\* FROM `combat_settlements`").
+		WithArgs(int64(21), req.RunId, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "player_id", "run_id", "response", "created_at"}).AddRow(1, 21, req.RunId, storedBytes, time.Now()))
+
+	response, err := repository.Settle(21, req)
+	if err != nil {
+		t.Fatalf("Settle() error = %v", err)
+	}
+	if !response.Duplicate {
+		t.Fatal("duplicate response has Duplicate = false, want true")
+	}
+	response.Duplicate = false
+	if !proto.Equal(response, stored) {
+		t.Fatalf("stored snapshot changed: got %v want %v", response, stored)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("MySQL transaction expectations: %v", err)
 	}
 }
 

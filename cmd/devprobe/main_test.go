@@ -18,6 +18,8 @@ import (
 func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 	var mu sync.Mutex
 	archives := map[string]*protocolpb.PlayerArchive{}
+	combatRuns := map[string]bool{}
+	combatRequests := 0
 	var savedArchives []*protocolpb.PlayerArchive
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,6 +56,27 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 		final := archives[login.Code]
 		mu.Unlock()
 		_ = writeProbeMessage(conn, protocol.MsgID_LoadArchiveResp, &protocolpb.LoadArchiveResp{Found: final != nil, Archive: final})
+		combat := &protocolpb.CombatResultReq{}
+		if err := readProbeMessage(conn, protocol.MsgID_CombatResultReq, combat); err != nil {
+			return
+		}
+		mu.Lock()
+		duplicate := combatRuns[combat.RunId]
+		combatRuns[combat.RunId] = true
+		combatRequests++
+		mu.Unlock()
+		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, &protocolpb.CombatResultResp{
+			Success: true, Duplicate: duplicate, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
+		})
+		if err := readProbeMessage(conn, protocol.MsgID_CombatResultReq, combat); err != nil {
+			return
+		}
+		mu.Lock()
+		combatRequests++
+		mu.Unlock()
+		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, &protocolpb.CombatResultResp{
+			Success: true, Duplicate: true, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
+		})
 	}))
 	defer server.Close()
 	address := "ws" + strings.TrimPrefix(server.URL, "http")
@@ -66,6 +89,9 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 	if len(savedArchives) != 2 {
 		t.Fatalf("saved archive count = %d, want 2", len(savedArchives))
 	}
+	if combatRequests != 4 {
+		t.Fatalf("combat settlement requests = %d, want 4", combatRequests)
+	}
 	for _, archive := range savedArchives {
 		if !proto.Equal(archive, newProbeArchive()) {
 			t.Fatalf("saved archive = %v, want typed probe archive %v", archive, newProbeArchive())
@@ -74,7 +100,7 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 }
 
 func TestProbeSuccessEvidenceDescribesTheTypedArchiveContract(t *testing.T) {
-	const want = "development session probe passed: protobuf login found=false typed save typed reload"
+	const want = "development session probe passed: protobuf login found=false typed save typed reload combat duplicate"
 	if probeSuccessEvidence != want {
 		t.Fatalf("probeSuccessEvidence = %q, want %q", probeSuccessEvidence, want)
 	}

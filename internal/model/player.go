@@ -25,7 +25,7 @@ func (Player) TableName() string {
 }
 
 // Archive 游戏存档表
-// 存储玩家的完整游戏存档，以 JSON 字符串形式保存
+// 存储玩家的完整游戏存档，以 protobuf 字节形式保存
 // 吸血鬼幸存者类游戏的存档结构变化频繁，用 JSON 存储比关系型更灵活
 type Archive struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`

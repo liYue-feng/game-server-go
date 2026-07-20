@@ -12,8 +12,20 @@ import (
 // 这是服务器端验证，不是客户端验证——客户端可以伪造数据，
 // 服务器必须对明显不合理的数据拒绝结算
 func validateCombatResult(req *protocolpb.CombatResultReq, cfg *CombatConfig) error {
+	if req == nil || cfg == nil {
+		return errors.New("invalid combat settlement")
+	}
+	if !validRunID(req.RunId) {
+		return errors.New("invalid run ID")
+	}
+	if req.Outcome != protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY && req.Outcome != protocolpb.BattleOutcome_BATTLE_OUTCOME_DEFEAT {
+		return errors.New("invalid combat outcome")
+	}
+	if req.PlayerLevel < 1 || req.PlayerLevel > maxPlayerLevel {
+		return fmt.Errorf("invalid player level: %d", req.PlayerLevel)
+	}
 	// 地牢等级必须大于0
-	if req.DungeonLevel <= 0 {
+	if req.DungeonLevel <= 0 || req.DungeonLevel > maxDungeonLevel {
 		return errors.New("无效的地牢等级")
 	}
 
@@ -42,7 +54,7 @@ func validateCombatResult(req *protocolpb.CombatResultReq, cfg *CombatConfig) er
 	}
 
 	// 流派ID合法性检查
-	if req.StyleId < 0 || req.StyleId > 5 {
+	if req.StyleId < 1 || req.StyleId > 5 {
 		return fmt.Errorf("无效的流派ID: style_id=%d", req.StyleId)
 	}
 

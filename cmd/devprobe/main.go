@@ -17,7 +17,7 @@ import (
 const (
 	probeAddress         = "ws://127.0.0.1:8080/ws"
 	probeTimeout         = 5 * time.Second
-	probeSuccessEvidence = "development session probe passed: protobuf login found=false typed save typed reload"
+	probeSuccessEvidence = "development session probe passed: protobuf login found=false typed save typed reload combat duplicate"
 )
 
 type probe struct {
@@ -92,6 +92,29 @@ func runProbe(address string) error {
 		return fmt.Errorf("archive did not round trip: got %v, want %v", finalLoad.Archive, expectedArchive)
 	}
 
+	combatRequest := newProbeCombatResult(loginCode)
+	if err := p.send(protocol.MsgID_CombatResultReq, combatRequest); err != nil {
+		return err
+	}
+	var firstSettlement protocolpb.CombatResultResp
+	if err := p.read(protocol.MsgID_CombatResultResp, &firstSettlement); err != nil {
+		return err
+	}
+	if !firstSettlement.Success || firstSettlement.Duplicate || firstSettlement.Archive == nil {
+		return fmt.Errorf("first combat settlement = %v, want successful non-duplicate archive response", &firstSettlement)
+	}
+
+	if err := p.send(protocol.MsgID_CombatResultReq, combatRequest); err != nil {
+		return err
+	}
+	var duplicateSettlement protocolpb.CombatResultResp
+	if err := p.read(protocol.MsgID_CombatResultResp, &duplicateSettlement); err != nil {
+		return err
+	}
+	if !duplicateSettlement.Success || !duplicateSettlement.Duplicate || !proto.Equal(duplicateSettlement.Archive, firstSettlement.Archive) || duplicateSettlement.RewardGold != firstSettlement.RewardGold || duplicateSettlement.RewardExp != firstSettlement.RewardExp || duplicateSettlement.BestScore != firstSettlement.BestScore {
+		return fmt.Errorf("duplicate combat settlement = %v, want stored first settlement snapshot", &duplicateSettlement)
+	}
+
 	return nil
 }
 
@@ -107,6 +130,19 @@ func newProbeArchive() *protocolpb.PlayerArchive {
 		TalentPoints:          5,
 		UnlockedStyles:        []int32{1, 3},
 		LastStyleId:           3,
+	}
+}
+
+func newProbeCombatResult(runID string) *protocolpb.CombatResultReq {
+	return &protocolpb.CombatResultReq{
+		RunId:        "probe-" + runID,
+		DungeonLevel: 2,
+		Score:        100,
+		Kills:        2,
+		DurationMs:   1_000,
+		StyleId:      1,
+		Outcome:      protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY,
+		PlayerLevel:  1,
 	}
 }
 
