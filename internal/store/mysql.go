@@ -15,6 +15,7 @@ import (
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 	gormlogger "gorm.io/gorm/logger"
 )
 
@@ -116,7 +117,22 @@ func (s *MySQLStore) CreatePlayer(player *model.Player) error {
 
 // UpdatePlayer 更新玩家信息
 func (s *MySQLStore) UpdatePlayer(player *model.Player) error {
-	return s.db.Save(player).Error
+	if player == nil {
+		return fmt.Errorf("update player: nil player")
+	}
+
+	result := s.db.Model(&model.Player{}).
+		Where("id = ?", player.ID).
+		Select("*").
+		Omit("id", "created_at").
+		Updates(player)
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("player %d: %w", player.ID, ErrNotFound)
+	}
+	return nil
 }
 
 // ========== 存档相关操作 ==========
@@ -132,9 +148,15 @@ func (s *MySQLStore) GetArchive(playerID int64) (*model.Archive, error) {
 }
 
 // SaveArchive 保存或更新存档
-// 使用 GORM 的 Save 方法：主键存在则更新，不存在则创建
 func (s *MySQLStore) SaveArchive(archive *model.Archive) error {
-	return s.db.Save(archive).Error
+	return saveArchiveQuery(s.db, archive).Error
+}
+
+func saveArchiveQuery(db *gorm.DB, archive *model.Archive) *gorm.DB {
+	return db.Omit("id").Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "player_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"data", "updated_at"}),
+	}).Create(archive)
 }
 
 // ========== 分数相关操作 ==========

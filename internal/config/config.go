@@ -13,6 +13,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/viper"
 )
@@ -20,12 +21,19 @@ import (
 // Config 顶层配置结构，与 config.yaml 一一对应
 // 每个子结构体对应 YAML 中的一个顶级键
 type Config struct {
-	Server ServerConfig `mapstructure:"server"` // 服务器配置
-	Redis  RedisConfig  `mapstructure:"redis"`  // Redis 配置
-	MySQL  MySQLConfig  `mapstructure:"mysql"`  // MySQL 配置
-	Wechat WechatConfig `mapstructure:"wechat"` // 微信配置
-	Log    LogConfig    `mapstructure:"log"`    // 日志配置
-	GM     GMConfig     `mapstructure:"gm"`     // GM 指令配置
+	Server      ServerConfig      `mapstructure:"server"` // 服务器配置
+	Redis       RedisConfig       `mapstructure:"redis"`  // Redis 配置
+	MySQL       MySQLConfig       `mapstructure:"mysql"`  // MySQL 配置
+	Wechat      WechatConfig      `mapstructure:"wechat"` // 微信配置
+	Log         LogConfig         `mapstructure:"log"`    // 日志配置
+	GM          GMConfig          `mapstructure:"gm"`     // GM 指令配置
+	Development DevelopmentConfig `mapstructure:"development"`
+}
+
+// DevelopmentConfig 控制仅供本地开发使用的基础设施和登录捷径。
+type DevelopmentConfig struct {
+	Enabled      bool `mapstructure:"enabled"`
+	LoginEnabled bool `mapstructure:"login_enabled"`
 }
 
 // ServerConfig 服务器基础配置
@@ -119,6 +127,7 @@ func Load(configPath string) (*Config, error) {
 	// 环境变量覆盖：容器部署时通过环境变量注入敏感配置（密码等）
 	// 环境变量前缀 GAME_ ，如 GAME_MYSQL_PASSWORD=xxx 覆盖 mysql.password
 	v.SetEnvPrefix("GAME")
+	v.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 	v.AutomaticEnv()
 
 	// 读取配置文件
