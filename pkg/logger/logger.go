@@ -22,6 +22,7 @@ import (
 
 // 全局 logger 实例，所有包通过 logger.Info/Error 等函数使用
 var globalLogger *zap.SugaredLogger
+var globalLogFile *lumberjack.Logger
 
 // Init 初始化日志系统。
 //
@@ -32,6 +33,11 @@ var globalLogger *zap.SugaredLogger
 //   - maxBackups: 保留的旧日志文件数量
 //   - maxAge: 保留旧日志文件的最大天数
 func Init(level, filename string, maxSize, maxBackups, maxAge int) {
+	if globalLogFile != nil {
+		_ = globalLogFile.Close()
+		globalLogFile = nil
+	}
+
 	// 1. 解析日志级别
 	zapLevel := parseLevel(level)
 
@@ -83,24 +89,23 @@ func Init(level, filename string, maxSize, maxBackups, maxAge int) {
 			zapLevel,
 		)
 		cores = append(cores, fileCore)
+		globalLogFile = fileWriter
 	}
 
 	// 4. 组合多个 Core，创建最终 Logger
 	// zapcore.NewTee 类似 Linux 的 tee 命令，同时输出到多个目标
 	combinedCore := zapcore.NewTee(cores...)
 
-	// 5. 构建最终的 Logger
-	// AddCaller() 让每条日志自动记录调用位置（文件名+行号）
-	// Skip(1) 跳过 logger 自身的包装层，显示真正的调用方
+	// The raw logger serves zap.L(), so it keeps the original caller frame.
 	rawLogger := zap.New(combinedCore,
 		zap.AddCaller(),
-		zap.AddCallerSkip(1),
 		zap.AddStacktrace(zapcore.ErrorLevel), // Error 及以上级别自动附加堆栈
 	)
 
 	// SugaredLogger 提供 printf 风格的 API，使用更方便
 	// 性能略低于 Logger，但对游戏服务器的日志量来说完全可以接受
-	globalLogger = rawLogger.Sugar()
+	globalLogger = rawLogger.WithOptions(zap.AddCallerSkip(1)).Sugar()
+	zap.ReplaceGlobals(rawLogger)
 }
 
 // parseLevel 将字符串日志级别转换为 zapcore.Level
@@ -121,15 +126,15 @@ func parseLevel(level string) zapcore.Level {
 
 // ========== 以下是日志输出函数，直接委托给全局 SugaredLogger ==========
 
-func Debug(args ...interface{})                 { globalLogger.Debug(args...) }
+func Debug(args ...interface{})                   { globalLogger.Debug(args...) }
 func Debugf(template string, args ...interface{}) { globalLogger.Debugf(template, args...) }
-func Info(args ...interface{})                  { globalLogger.Info(args...) }
+func Info(args ...interface{})                    { globalLogger.Info(args...) }
 func Infof(template string, args ...interface{})  { globalLogger.Infof(template, args...) }
-func Warn(args ...interface{})                  { globalLogger.Warn(args...) }
+func Warn(args ...interface{})                    { globalLogger.Warn(args...) }
 func Warnf(template string, args ...interface{})  { globalLogger.Warnf(template, args...) }
-func Error(args ...interface{})                 { globalLogger.Error(args...) }
+func Error(args ...interface{})                   { globalLogger.Error(args...) }
 func Errorf(template string, args ...interface{}) { globalLogger.Errorf(template, args...) }
-func Fatal(args ...interface{})                 { globalLogger.Fatal(args...) }
+func Fatal(args ...interface{})                   { globalLogger.Fatal(args...) }
 func Fatalf(template string, args ...interface{}) { globalLogger.Fatalf(template, args...) }
 
 // Sync 刷新日志缓冲区，程序退出前应调用
@@ -137,5 +142,14 @@ func Fatalf(template string, args ...interface{}) { globalLogger.Fatalf(template
 func Sync() {
 	if globalLogger != nil {
 		_ = globalLogger.Sync()
+	}
+}
+
+// Close flushes logs and releases the active file writer.
+func Close() {
+	Sync()
+	if globalLogFile != nil {
+		_ = globalLogFile.Close()
+		globalLogFile = nil
 	}
 }

@@ -154,12 +154,12 @@ func main() {
 		cfg.Log.MaxBackups,
 		cfg.Log.MaxAge,
 	)
-	defer logger.Sync()
+	defer logger.Close()
 
 	appRuntime, err := newRuntime(cfg)
 	if err != nil {
 		zap.L().Error("initialize server runtime", zap.Error(err))
-		logger.Sync()
+		logger.Close()
 		os.Exit(1)
 	}
 
