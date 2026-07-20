@@ -68,13 +68,29 @@ func NewMySQLStore(cfg *config.MySQLConfig) (*MySQLStore, error) {
 	// 自动迁移表结构
 	// AutoMigrate 会创建不存在的表和列，但不会删除已有的列（安全）
 	// 生产环境建议使用独立的 migration 工具（如 golang-migrate）
-	if err := db.AutoMigrate(&model.Player{}, &model.Archive{}, &model.ScoreRecord{}, &model.PaymentOrder{}, &model.PlayerStats{}, &model.PlayerStyle{}); err != nil {
+	if err := validateAndCloseOnFailure(
+		func() error {
+			return db.AutoMigrate(&model.Player{}, &model.Archive{}, &model.ScoreRecord{}, &model.PaymentOrder{}, &model.PlayerStats{}, &model.PlayerStyle{})
+		},
+		sqlDB.Close,
+	); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
 
 	zap.L().Info("MySQL 初始化成功", zap.String("dsn", maskPassword(cfg.DSN())))
 
 	return &MySQLStore{db: db}, nil
+}
+
+func validateAndCloseOnFailure(validate func() error, closeResource func() error) error {
+	err := validate()
+	if err == nil {
+		return nil
+	}
+
+	// The initialization failure is authoritative; cleanup must not replace it.
+	_ = closeResource()
+	return err
 }
 
 // Close 关闭数据库连接

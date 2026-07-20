@@ -111,6 +111,12 @@ func (k *Kernel) IsAuthFree(msgID uint16) bool {
 	return ok && e.authFree
 }
 
+// HasHandler reports whether a request message has a registered handler.
+func (k *Kernel) HasHandler(msgID uint16) bool {
+	_, ok := k.handlers[msgID]
+	return ok
+}
+
 // Dispatch 处理一整帧数据：解码 -> 定位 -> 前置 -> 反射调用 -> 后置 -> 编码并发送响应。
 //
 // ctx 必须已携带 *session.Session（由 transport 层注入）。

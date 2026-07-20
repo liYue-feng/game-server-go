@@ -156,3 +156,18 @@ func TestAuthFreeFlag(t *testing.T) {
 		t.Fatal("未注册消息不应为免鉴权")
 	}
 }
+
+func TestHasHandlerReportsRegistration(t *testing.T) {
+	k := New(nil)
+	k.Register(protocol.MsgID_LoginReq, protocol.MsgID_LoginResp,
+		func(context.Context, *protocol.LoginReq) (*protocol.LoginResp, error) {
+			return &protocol.LoginResp{}, nil
+		})
+
+	if !k.HasHandler(protocol.MsgID_LoginReq) {
+		t.Fatal("registered message should have a handler")
+	}
+	if k.HasHandler(protocol.MsgID_SaveArchiveReq) {
+		t.Fatal("unregistered message should not have a handler")
+	}
+}

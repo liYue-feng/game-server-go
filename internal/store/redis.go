@@ -36,7 +36,10 @@ func NewRedisStore(cfg *config.RedisConfig) (*RedisStore, error) {
 	ctx := context.Background()
 
 	// 测试连接是否正常
-	if err := client.Ping(ctx).Err(); err != nil {
+	if err := validateAndCloseOnFailure(
+		func() error { return client.Ping(ctx).Err() },
+		client.Close,
+	); err != nil {
 		return nil, fmt.Errorf("连接 Redis 失败: %w", err)
 	}
 

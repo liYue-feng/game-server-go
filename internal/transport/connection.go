@@ -12,6 +12,8 @@ package transport
 
 import (
 	"context"
+	"errors"
+	"sync"
 	"time"
 
 	"game-server/internal/kernel"
@@ -20,6 +22,11 @@ import (
 
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+)
+
+var (
+	ErrConnectionClosed = errors.New("transport connection closed")
+	errSendBufferFull   = errors.New("transport send buffer full")
 )
 
 const (
@@ -43,6 +50,10 @@ type Connection struct {
 	send   chan []byte      // 发送缓冲区，writePump 从这里取数据写出
 	kernel *kernel.Kernel   // 消息处理内核
 	sess   *session.Session // 该连接的玩家会话
+	done   chan struct{}
+
+	mu     sync.RWMutex
+	closed bool
 }
 
 // newConnection 创建连接实例，并绑定一个未登录的会话。
@@ -52,6 +63,7 @@ func newConnection(hub *Hub, wsConn *websocket.Conn, k *kernel.Kernel) *Connecti
 		conn:   wsConn,
 		send:   make(chan []byte, sendBufSize),
 		kernel: k,
+		done:   make(chan struct{}),
 	}
 	// 会话以本连接作为底层 Conn（实现 session.Conn 的 SendMessage）
 	c.sess = session.New(c)
@@ -73,16 +85,55 @@ func (c *Connection) SendMessage(msgID uint16, payload interface{}) error {
 	if err != nil {
 		return err
 	}
-	select {
-	case c.send <- data:
-		return nil
-	default:
+	if err := c.enqueue(data); err != nil {
+		if err != errSendBufferFull {
+			return err
+		}
 		zap.L().Warn("发送缓冲区已满，丢弃消息",
 			zap.Int64("uid", c.sess.UID()),
 			zap.Uint16("msgID", msgID),
 		)
 		return nil
 	}
+	return nil
+}
+
+func (c *Connection) enqueue(data []byte) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return ErrConnectionClosed
+	}
+	select {
+	case c.send <- data:
+		return nil
+	default:
+		return errSendBufferFull
+	}
+}
+
+func (c *Connection) stop() {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.closed = true
+	close(c.done)
+	c.mu.Unlock()
+	_ = c.conn.Close()
+}
+
+func (c *Connection) run() {
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		c.writePump()
+	}()
+
+	c.readPump()
+	c.stop()
+	<-writerDone
 }
 
 // readPump 读取泵：从 WebSocket 读取客户端消息并交给 kernel 分发。
@@ -92,7 +143,7 @@ func (c *Connection) readPump() {
 	defer func() {
 		c.hub.Unregister(c)
 		c.sess.Close() // 触发 OnClose 回调（退组、清缓存等）
-		c.conn.Close()
+		c.stop()
 	}()
 
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -125,23 +176,20 @@ func (c *Connection) readPump() {
 
 // writePump 写入泵：从发送缓冲区取数据写入 WebSocket，并定期发 ping 保活。
 //
-// 退出条件：发送失败、连接关闭，或 send 通道被关闭（Hub 要求断开）。
+// 退出条件：发送失败、连接关闭，或 Hub 关闭连接的 done 信号到达。
 func (c *Connection) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		c.stop()
 	}()
 
 	for {
 		select {
-		case message, ok := <-c.send:
+		case <-c.done:
+			return
+		case message := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				// send 被关闭：Hub 要求断开此连接。
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
-				return
-			}
 			if err := c.conn.WriteMessage(websocket.BinaryMessage, message); err != nil {
 				zap.L().Error("WebSocket 写入失败", zap.Int64("uid", c.sess.UID()), zap.Error(err))
 				return

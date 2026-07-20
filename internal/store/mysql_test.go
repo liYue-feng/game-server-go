@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"errors"
 	"log"
 	"strings"
 	"testing"
@@ -10,6 +11,27 @@ import (
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
+
+func TestValidateAndCloseOnFailureClosesMySQLOnceAndPreservesMigrationError(t *testing.T) {
+	migrationErr := errors.New("migration failed")
+	closeErr := errors.New("close failed")
+	closeCalls := 0
+
+	err := validateAndCloseOnFailure(
+		func() error { return migrationErr },
+		func() error {
+			closeCalls++
+			return closeErr
+		},
+	)
+
+	if err != migrationErr {
+		t.Fatalf("validateAndCloseOnFailure() error = %v, want original migration error %v", err, migrationErr)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("validateAndCloseOnFailure() close calls = %d, want 1", closeCalls)
+	}
+}
 
 func TestSaveArchiveBuildsAtomicPlayerIDUpsert(t *testing.T) {
 	db, err := gorm.Open(mysql.New(mysql.Config{
