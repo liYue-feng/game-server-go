@@ -18,9 +18,11 @@ package login
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 
 	"game-server/internal/config"
@@ -69,7 +71,7 @@ func (c *WechatClient) Code2Session(code string) (*Code2SessionResult, error) {
 	// 发送 GET 请求
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("请求微信 API 失败: %w", err)
+		return nil, newWechatTransportError(err)
 	}
 	defer resp.Body.Close()
 
@@ -79,13 +81,16 @@ func (c *WechatClient) Code2Session(code string) (*Code2SessionResult, error) {
 		return nil, fmt.Errorf("读取微信响应失败: %w", err)
 	}
 
-	zap.L().Debug("微信 code2session 响应", zap.String("body", string(body)))
-
 	// 解析 JSON
 	var result Code2SessionResult
 	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("解析微信响应失败: %w", err)
 	}
+	zap.L().Debug("微信 code2session 响应",
+		zap.Int("status", resp.StatusCode),
+		zap.Int("errCode", result.ErrCode),
+		zap.Bool("hasOpenID", result.OpenID != ""),
+	)
 
 	// 检查微信返回的错误码
 	// 常见错误：
@@ -97,6 +102,26 @@ func (c *WechatClient) Code2Session(code string) (*Code2SessionResult, error) {
 	}
 
 	return &result, nil
+}
+
+type wechatTransportError struct {
+	cause error
+}
+
+func newWechatTransportError(err error) error {
+	var requestErr *url.Error
+	if errors.As(err, &requestErr) && requestErr.Err != nil {
+		err = requestErr.Err
+	}
+	return &wechatTransportError{cause: err}
+}
+
+func (e *wechatTransportError) Error() string {
+	return "wechat API request failed"
+}
+
+func (e *wechatTransportError) Unwrap() error {
+	return e.cause
 }
 
 func wechatAPIError(result Code2SessionResult) error {

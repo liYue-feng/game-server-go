@@ -41,6 +41,7 @@ func (h *Handler) LoadArchive(ctx context.Context, req *protocol.LoadArchiveReq)
 		zap.L().Error("加载存档失败", zap.Int64("uid", uid), zap.Error(err))
 		return nil, protocol.NewBizError(protocol.ErrInternal, "加载存档失败")
 	}
+	zap.L().Info("加载存档成功", zap.Int64("uid", uid), zap.Int("dataLen", len(data)))
 	return &protocol.LoadArchiveResp{Data: data}, nil
 }
 

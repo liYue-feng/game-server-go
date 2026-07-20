@@ -156,6 +156,7 @@ func (s *playerRepositoryStub) UpdatePlayer(*store.Player) error { return nil }
 
 type sessionRepositoryStub struct {
 	session *store.SessionData
+	getErr  error
 	setErr  error
 }
 
@@ -168,6 +169,9 @@ func (s *sessionRepositoryStub) SetSession(_ int64, data *store.SessionData) err
 	return nil
 }
 func (s *sessionRepositoryStub) GetSession(int64) (*store.SessionData, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
 	if s.session == nil {
 		return nil, nil
 	}
