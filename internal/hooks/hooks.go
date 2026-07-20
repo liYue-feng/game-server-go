@@ -34,7 +34,7 @@ import (
 //  4. Redis 故障 → 降级放行（宁可放过，不可误杀）
 //
 // k 用于判断某消息是否免鉴权（对齐旧 Router 的 skip 逻辑）。
-func Auth(redis *store.RedisStore, k *kernel.Kernel) pipeline.BeforeHandler {
+func Auth(sessions store.SessionRepository, k *kernel.Kernel) pipeline.BeforeHandler {
 	return func(ctx context.Context, in interface{}) (context.Context, interface{}, error) {
 		if k.IsAuthFree(kernel.MsgIDFromContext(ctx)) {
 			return ctx, in, nil
@@ -49,7 +49,7 @@ func Auth(redis *store.RedisStore, k *kernel.Kernel) pipeline.BeforeHandler {
 			return ctx, in, protocol.NewBizError(protocol.ErrUnauthorized, "请先登录")
 		}
 
-		sess, err := redis.GetSession(uid)
+		sess, err := sessions.GetSession(uid)
 		if err != nil {
 			// Redis 故障降级：允许请求通过。
 			zap.L().Error("读取会话失败", zap.Int64("uid", uid), zap.Error(err))

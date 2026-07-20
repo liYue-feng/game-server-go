@@ -93,8 +93,15 @@ func (c *WechatClient) Code2Session(code string) (*Code2SessionResult, error) {
 	//   - 45011: 频率限制（每分钟 100 次）
 	//   - -1: 系统繁忙
 	if result.ErrCode != 0 {
-		return nil, fmt.Errorf("微信 API 错误: code=%d msg=%s", result.ErrCode, result.ErrMsg)
+		return nil, wechatAPIError(result)
 	}
 
 	return &result, nil
+}
+
+func wechatAPIError(result Code2SessionResult) error {
+	if result.ErrCode == 40029 {
+		return fmt.Errorf("%w: wechat API code=%d msg=%s", ErrInvalidLoginCode, result.ErrCode, result.ErrMsg)
+	}
+	return fmt.Errorf("wechat API error: code=%d msg=%s", result.ErrCode, result.ErrMsg)
 }
