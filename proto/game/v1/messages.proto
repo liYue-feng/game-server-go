@@ -1,0 +1,218 @@
+syntax = "proto3";
+
+package game.protocol.v1;
+
+option go_package = "game-server/internal/protocolpb;protocolpb";
+option csharp_namespace = "Game.Protocol";
+
+enum MessageId {
+  MESSAGE_ID_UNSPECIFIED = 0;
+  MESSAGE_ID_LOGIN_REQ = 1001;
+  MESSAGE_ID_LOGIN_RESP = 1002;
+  MESSAGE_ID_HEARTBEAT_REQ = 1003;
+  MESSAGE_ID_HEARTBEAT_RESP = 1004;
+  MESSAGE_ID_SAVE_ARCHIVE_REQ = 2001;
+  MESSAGE_ID_SAVE_ARCHIVE_RESP = 2002;
+  MESSAGE_ID_LOAD_ARCHIVE_REQ = 2003;
+  MESSAGE_ID_LOAD_ARCHIVE_RESP = 2004;
+  MESSAGE_ID_GET_RANK_REQ = 3001;
+  MESSAGE_ID_GET_RANK_RESP = 3002;
+  MESSAGE_ID_SUBMIT_SCORE_REQ = 3003;
+  MESSAGE_ID_SUBMIT_SCORE_RESP = 3004;
+  MESSAGE_ID_COMBAT_RESULT_REQ = 4001;
+  MESSAGE_ID_COMBAT_RESULT_RESP = 4002;
+  MESSAGE_ID_GET_ENEMY_CONFIGS_REQ = 4003;
+  MESSAGE_ID_GET_ENEMY_CONFIGS_RESP = 4004;
+  MESSAGE_ID_GET_DUNGEON_CONFIG_REQ = 4005;
+  MESSAGE_ID_GET_DUNGEON_CONFIG_RESP = 4006;
+  MESSAGE_ID_GET_STYLE_CONFIGS_REQ = 4007;
+  MESSAGE_ID_GET_STYLE_CONFIGS_RESP = 4008;
+  MESSAGE_ID_UNLOCK_STYLE_REQ = 4009;
+  MESSAGE_ID_UNLOCK_STYLE_RESP = 4010;
+  MESSAGE_ID_GET_PLAYER_STATS_REQ = 4011;
+  MESSAGE_ID_GET_PLAYER_STATS_RESP = 4012;
+  MESSAGE_ID_UPDATE_PLAYER_STATS_REQ = 4013;
+  MESSAGE_ID_UPDATE_PLAYER_STATS_RESP = 4014;
+  MESSAGE_ID_CREATE_ORDER_REQ = 5001;
+  MESSAGE_ID_CREATE_ORDER_RESP = 5002;
+  MESSAGE_ID_PAY_RESULT_NOTIFY = 5003;
+  MESSAGE_ID_GM_COMMAND_REQ = 6001;
+  MESSAGE_ID_GM_COMMAND_RESP = 6002;
+  MESSAGE_ID_ERROR = 9999;
+}
+
+enum BattleOutcome {
+  BATTLE_OUTCOME_UNSPECIFIED = 0;
+  BATTLE_OUTCOME_VICTORY = 1;
+  BATTLE_OUTCOME_DEFEAT = 2;
+}
+
+message LoginReq { string code = 1; }
+message LoginResp {
+  int64 uid = 1;
+  string nickname = 2;
+  string token = 3;
+}
+message HeartbeatReq { int64 timestamp = 1; }
+message HeartbeatResp { int64 timestamp = 1; }
+
+message PlayerArchive {
+  int32 schema_version = 1;
+  int32 gold = 2;
+  int32 exp = 3;
+  int64 best_score = 4;
+  int64 total_kills = 5;
+  int64 total_games = 6;
+  int32 highest_cleared_dungeon = 7;
+  int32 talent_points = 8;
+  repeated int32 unlocked_styles = 9;
+  int32 last_style_id = 10;
+}
+message SaveArchiveReq { PlayerArchive archive = 1; }
+message SaveArchiveResp { bool success = 1; }
+message LoadArchiveReq {}
+message LoadArchiveResp {
+  bool found = 1;
+  PlayerArchive archive = 2;
+}
+
+message GetRankReq {
+  int32 rank_type = 1;
+  int32 start = 2;
+  int32 count = 3;
+}
+message RankItem {
+  int64 uid = 1;
+  string nickname = 2;
+  int32 level = 3;
+  int64 score = 4;
+  int32 rank = 5;
+}
+message GetRankResp { repeated RankItem ranks = 1; }
+message ScoreMetadata {
+  int64 duration_ms = 1;
+  int32 kills = 2;
+  int32 dungeon_level = 3;
+  int32 style_id = 4;
+  int32 player_level = 5;
+}
+message SubmitScoreReq {
+  int64 score = 1;
+  ScoreMetadata metadata = 2;
+}
+message SubmitScoreResp {
+  bool success = 1;
+  int64 best_score = 2;
+}
+
+message CombatResultReq {
+  string run_id = 1;
+  int32 dungeon_level = 2;
+  int64 score = 3;
+  int32 kills = 4;
+  int64 duration_ms = 5;
+  int32 style_id = 6;
+  BattleOutcome outcome = 7;
+  int32 player_level = 8;
+}
+message CombatResultResp {
+  bool success = 1;
+  bool duplicate = 2;
+  int32 reward_gold = 3;
+  int32 reward_exp = 4;
+  int64 best_score = 5;
+  PlayerArchive archive = 6;
+}
+message EnemyConfigItem {
+  int32 id = 1;
+  string name = 2;
+  int32 hp = 3;
+  int32 damage = 4;
+  float speed = 5;
+  float attack_range = 6;
+  string enemy_type = 7;
+}
+message GetEnemyConfigsReq {}
+message GetEnemyConfigsResp { repeated EnemyConfigItem configs = 1; }
+message DungeonConfigItem {
+  int32 level = 1;
+  int32 room_count = 2;
+  float enemy_density = 3;
+  int32 boss_id = 4;
+}
+message GetDungeonConfigReq { int32 level = 1; }
+message GetDungeonConfigResp {
+  int32 level = 1;
+  int32 room_count = 2;
+  float enemy_density = 3;
+  int32 boss_id = 4;
+  repeated EnemyConfigItem enemy_configs = 5;
+}
+message StyleConfigItem {
+  int32 style_id = 1;
+  string style_name = 2;
+  float damage_mult = 3;
+  float speed_mult = 4;
+  float parry_mult = 5;
+  float dash_speed_mult = 6;
+  float dash_cost_mult = 7;
+  int32 special_resource_max = 8;
+  string special_resource_name = 9;
+  string description = 10;
+}
+message GetStyleConfigsReq {}
+message GetStyleConfigsResp { repeated StyleConfigItem styles = 1; }
+message UnlockStyleReq { int32 style_id = 1; }
+message UnlockStyleResp {
+  bool success = 1;
+  int32 gold_cost = 2;
+}
+message PlayerStatsData {
+  int32 level = 1;
+  int32 exp = 2;
+  int32 gold = 3;
+  int32 max_hp = 4;
+  int32 max_stamina = 5;
+  int32 attack_power = 6;
+  repeated int32 unlocked_styles = 7;
+}
+message GetPlayerStatsReq {}
+message GetPlayerStatsResp {
+  int32 level = 1;
+  int32 exp = 2;
+  int32 gold = 3;
+  int32 max_hp = 4;
+  int32 max_stamina = 5;
+  int32 attack_power = 6;
+  repeated int32 unlocked_styles = 7;
+}
+message UpdatePlayerStatsReq {
+  int32 level = 1;
+  int32 exp = 2;
+  int32 gold = 3;
+  int32 max_hp = 4;
+  int32 max_stamina = 5;
+  int32 attack_power = 6;
+  repeated int32 unlocked_styles = 7;
+}
+message UpdatePlayerStatsResp { bool success = 1; }
+
+message CreateOrderReq { int32 product_id = 1; }
+message CreateOrderResp { string order_no = 1; }
+message PayResultNotify {
+  string order_no = 1;
+  string status = 2;
+  int32 product_id = 3;
+}
+message GMCommandReq {
+  string cmd = 1;
+  bytes args_json = 2;
+}
+message GMCommandResp {
+  string cmd = 1;
+  string result = 2;
+}
+message ErrorResp {
+  int32 code = 1;
+  string msg = 2;
+}
