@@ -56,22 +56,22 @@ const (
 	MsgID_PayResultNotify uint16 = 5003 // 支付结果通知（服务器主动推送）
 
 	// ---- GM指令模块 ----
-	MsgID_GMCommandReq    uint16 = 6001 // GM指令请求
-	MsgID_GMCommandResp   uint16 = 6002 // GM指令响应
+	MsgID_GMCommandReq  uint16 = 6001 // GM指令请求
+	MsgID_GMCommandResp uint16 = 6002 // GM指令响应
 
 	// ---- 战斗模块 ----
-	MsgID_CombatResultReq   uint16 = 4001 // 战斗结算请求（地牢通关/失败后上报）
-	MsgID_CombatResultResp  uint16 = 4002 // 战斗结算响应
-	MsgID_GetEnemyConfigsReq  uint16 = 4003 // 获取敌人配置请求
-	MsgID_GetEnemyConfigsResp uint16 = 4004 // 获取敌人配置响应
-	MsgID_GetDungeonConfigReq  uint16 = 4005 // 获取地牢配置请求
-	MsgID_GetDungeonConfigResp uint16 = 4006 // 获取地牢配置响应
-	MsgID_GetStyleConfigsReq  uint16 = 4007 // 获取流派配置请求
-	MsgID_GetStyleConfigsResp uint16 = 4008 // 获取流派配置响应
-	MsgID_UnlockStyleReq    uint16 = 4009 // 解锁流派请求
-	MsgID_UnlockStyleResp   uint16 = 4010 // 解锁流派响应
-	MsgID_GetPlayerStatsReq  uint16 = 4011 // 获取玩家战斗属性请求
-	MsgID_GetPlayerStatsResp uint16 = 4012 // 获取玩家战斗属性响应
+	MsgID_CombatResultReq       uint16 = 4001 // 战斗结算请求（地牢通关/失败后上报）
+	MsgID_CombatResultResp      uint16 = 4002 // 战斗结算响应
+	MsgID_GetEnemyConfigsReq    uint16 = 4003 // 获取敌人配置请求
+	MsgID_GetEnemyConfigsResp   uint16 = 4004 // 获取敌人配置响应
+	MsgID_GetDungeonConfigReq   uint16 = 4005 // 获取地牢配置请求
+	MsgID_GetDungeonConfigResp  uint16 = 4006 // 获取地牢配置响应
+	MsgID_GetStyleConfigsReq    uint16 = 4007 // 获取流派配置请求
+	MsgID_GetStyleConfigsResp   uint16 = 4008 // 获取流派配置响应
+	MsgID_UnlockStyleReq        uint16 = 4009 // 解锁流派请求
+	MsgID_UnlockStyleResp       uint16 = 4010 // 解锁流派响应
+	MsgID_GetPlayerStatsReq     uint16 = 4011 // 获取玩家战斗属性请求
+	MsgID_GetPlayerStatsResp    uint16 = 4012 // 获取玩家战斗属性响应
 	MsgID_UpdatePlayerStatsReq  uint16 = 4013 // 更新玩家战斗属性请求
 	MsgID_UpdatePlayerStatsResp uint16 = 4014 // 更新玩家战斗属性响应
 
@@ -168,12 +168,12 @@ type SubmitScoreResp struct {
 // 每次地牢通关或角色死亡后，客户端上报本局战斗数据。
 // 服务器做基础反作弊校验后，计算奖励并更新玩家数据。
 type CombatResultReq struct {
-	DungeonLevel  int     `json:"dungeon_level"`  // 地牢等级
-	Score         int     `json:"score"`           // 本局得分
-	Kills         int     `json:"kills"`           // 击杀数
-	SurvivalTime  float64 `json:"survival_time"`   // 存活时间（秒）
-	StyleID       int     `json:"style_id"`        // 使用的流派ID（0=无）
-	CombatLog     string  `json:"combat_log"`      // 简化战斗日志JSON，用于反作弊
+	DungeonLevel int     `json:"dungeon_level"` // 地牢等级
+	Score        int     `json:"score"`         // 本局得分
+	Kills        int     `json:"kills"`         // 击杀数
+	SurvivalTime float64 `json:"survival_time"` // 存活时间（秒）
+	StyleID      int     `json:"style_id"`      // 使用的流派ID（0=无）
+	CombatLog    string  `json:"combat_log"`    // 简化战斗日志JSON，用于反作弊
 }
 
 // CombatResultResp 战斗结算响应
@@ -205,10 +205,10 @@ type GetEnemyConfigsResp struct {
 
 // DungeonConfigItem 地牢配置
 type DungeonConfigItem struct {
-	Level         int     `json:"level"`          // 地牢等级
-	RoomCount     int     `json:"room_count"`     // 房间数量
-	EnemyDensity  float64 `json:"enemy_density"`  // 敌人密度系数
-	BossID        int     `json:"boss_id"`        // Boss类型ID
+	Level        int     `json:"level"`         // 地牢等级
+	RoomCount    int     `json:"room_count"`    // 房间数量
+	EnemyDensity float64 `json:"enemy_density"` // 敌人密度系数
+	BossID       int     `json:"boss_id"`       // Boss类型ID
 }
 
 // GetDungeonConfigReq 获取地牢配置请求
@@ -218,11 +218,11 @@ type GetDungeonConfigReq struct {
 
 // GetDungeonConfigResp 获取地牢配置响应
 type GetDungeonConfigResp struct {
-	Level        int                `json:"level"`         // 地牢等级
-	RoomCount    int                `json:"room_count"`    // 房间数量
-	EnemyDensity float64            `json:"enemy_density"` // 敌人密度
-	BossID       int                `json:"boss_id"`       // Boss类型ID
-	EnemyConfigs []EnemyConfigItem  `json:"enemy_configs"` // 该等级可出现的敌人
+	Level        int               `json:"level"`         // 地牢等级
+	RoomCount    int               `json:"room_count"`    // 房间数量
+	EnemyDensity float64           `json:"enemy_density"` // 敌人密度
+	BossID       int               `json:"boss_id"`       // Boss类型ID
+	EnemyConfigs []EnemyConfigItem `json:"enemy_configs"` // 该等级可出现的敌人
 }
 
 // StyleConfigItem 流派配置条目

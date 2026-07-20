@@ -1,10 +1,10 @@
-# Agent Guidelines for Go Game Server
+﻿# Agent Guidelines for Go Game Server
 
 This document contains build, test, and code style guidelines for the Go game server project. Agents should follow these conventions when working in this repository.
 
 ## Project Overview
 
-A Go-based game server for "Vampire Survivors" style WeChat mini-games. Uses a modular monolith architecture with WebSocket gateway, login (WeChat), game archive, and ranking modules.
+A Go-based game server for "Vampire Survivors" style WeChat mini-games. Uses a modular monolith architecture. The network layer is refactored to a pitaya-inspired core (kernel + session + pipeline + transport) while keeping the original binary wire protocol; business modules cover login (WeChat), game archive, ranking, payment, and GM.
 
 ## Build & Run
 
@@ -32,7 +32,11 @@ cmd/server/          # Entry point (main.go)
 configs/             # YAML configuration
 internal/
   config/            # Config loading (Viper)
-  gateway/           # WebSocket gateway: connection, hub, router, server
+  session/           # Player session (Bind/UID/Set/Get/Push) + ctx accessors
+  pipeline/          # Handler pipeline (Before/After hooks)
+  kernel/            # Message kernel: Register + reflection-based Dispatch
+  transport/         # WebSocket transport: connection, hub, server (/ws, /health)
+  hooks/             # pipeline before-hooks: auth + rate limit
   login/             # WeChat login, heartbeat
   game/              # Save/load game archives
   rank/              # Leaderboard (Redis Sorted Set)

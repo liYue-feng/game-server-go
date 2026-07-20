@@ -24,7 +24,8 @@ type Config struct {
 	Redis  RedisConfig  `mapstructure:"redis"`  // Redis 配置
 	MySQL  MySQLConfig  `mapstructure:"mysql"`  // MySQL 配置
 	Wechat WechatConfig `mapstructure:"wechat"` // 微信配置
-	Log    LogConfig    `mapstructure:"log"`     // 日志配置
+	Log    LogConfig    `mapstructure:"log"`    // 日志配置
+	GM     GMConfig     `mapstructure:"gm"`     // GM 指令配置
 }
 
 // ServerConfig 服务器基础配置
@@ -37,6 +38,15 @@ type ServerConfig struct {
 // Addr 返回监听地址，格式 "host:port"
 func (s *ServerConfig) Addr() string {
 	return fmt.Sprintf("%s:%d", s.Host, s.Port)
+}
+
+// GMConfig GM 指令配置
+//
+// 为什么把管理员白名单放配置里？
+//   - 管理员 UID 属于运维数据，硬编码每次调整都要重新编译发布
+//   - 放配置后可随环境区分，也可通过环境变量 GAME_GM_ADMIN_UIDS 注入
+type GMConfig struct {
+	AdminUIDs []int64 `mapstructure:"admin_uids"` // 管理员 UID 白名单
 }
 
 // RedisConfig Redis 连接配置
@@ -54,11 +64,11 @@ func (r *RedisConfig) Addr() string {
 
 // MySQLConfig MySQL 连接配置
 type MySQLConfig struct {
-	Host         string `mapstructure:"host"`          // MySQL 地址
-	Port         int    `mapstructure:"port"`          // MySQL 端口
-	User         string `mapstructure:"user"`          // 用户名
-	Password     string `mapstructure:"password"`      // 密码
-	DBName       string `mapstructure:"dbname"`        // 数据库名
+	Host         string `mapstructure:"host"`           // MySQL 地址
+	Port         int    `mapstructure:"port"`           // MySQL 端口
+	User         string `mapstructure:"user"`           // 用户名
+	Password     string `mapstructure:"password"`       // 密码
+	DBName       string `mapstructure:"dbname"`         // 数据库名
 	MaxIdleConns int    `mapstructure:"max_idle_conns"` // 空闲连接池最大连接数
 	MaxOpenConns int    `mapstructure:"max_open_conns"` // 最大打开连接数
 }
@@ -74,15 +84,22 @@ func (m *MySQLConfig) DSN() string {
 type WechatConfig struct {
 	AppID     string `mapstructure:"app_id"`     // 小游戏 AppID
 	AppSecret string `mapstructure:"app_secret"` // 小游戏 AppSecret
+
+	// 微信支付配置
+	MchID             string `mapstructure:"mch_id"`               // 微信支付商户号
+	MchPrivateKeyPath string `mapstructure:"mch_private_key_path"` // 商户私钥文件路径（apiv3 要求）
+	MchCertSerialNo   string `mapstructure:"mch_cert_serial_no"`   // 商户证书序列号
+	WechatPayCertPath string `mapstructure:"wechat_pay_cert_path"` // 微信支付平台证书文件路径（用于验证回调签名）
+	PayNotifyURL      string `mapstructure:"pay_notify_url"`       // 支付回调通知 URL
 }
 
 // LogConfig 日志配置
 type LogConfig struct {
 	Level      string `mapstructure:"level"`       // 日志级别
 	Filename   string `mapstructure:"filename"`    // 日志文件路径
-	MaxSize    int    `mapstructure:"max_size"`     // 单个日志文件最大 MB
-	MaxBackups int    `mapstructure:"max_backups"`  // 保留旧日志文件数量
-	MaxAge     int    `mapstructure:"max_age"`      // 保留旧日志文件天数
+	MaxSize    int    `mapstructure:"max_size"`    // 单个日志文件最大 MB
+	MaxBackups int    `mapstructure:"max_backups"` // 保留旧日志文件数量
+	MaxAge     int    `mapstructure:"max_age"`     // 保留旧日志文件天数
 }
 
 // Load 从指定路径加载配置文件

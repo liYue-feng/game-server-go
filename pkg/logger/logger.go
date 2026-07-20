@@ -121,15 +121,15 @@ func parseLevel(level string) zapcore.Level {
 
 // ========== 以下是日志输出函数，直接委托给全局 SugaredLogger ==========
 
-func Debug(args ...interface{})                 { globalLogger.Debug(args...) }
+func Debug(args ...interface{})                   { globalLogger.Debug(args...) }
 func Debugf(template string, args ...interface{}) { globalLogger.Debugf(template, args...) }
-func Info(args ...interface{})                  { globalLogger.Info(args...) }
+func Info(args ...interface{})                    { globalLogger.Info(args...) }
 func Infof(template string, args ...interface{})  { globalLogger.Infof(template, args...) }
-func Warn(args ...interface{})                  { globalLogger.Warn(args...) }
+func Warn(args ...interface{})                    { globalLogger.Warn(args...) }
 func Warnf(template string, args ...interface{})  { globalLogger.Warnf(template, args...) }
-func Error(args ...interface{})                 { globalLogger.Error(args...) }
+func Error(args ...interface{})                   { globalLogger.Error(args...) }
 func Errorf(template string, args ...interface{}) { globalLogger.Errorf(template, args...) }
-func Fatal(args ...interface{})                 { globalLogger.Fatal(args...) }
+func Fatal(args ...interface{})                   { globalLogger.Fatal(args...) }
 func Fatalf(template string, args ...interface{}) { globalLogger.Fatalf(template, args...) }
 
 // Sync 刷新日志缓冲区，程序退出前应调用

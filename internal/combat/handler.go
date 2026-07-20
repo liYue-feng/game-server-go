@@ -1,187 +1,298 @@
+// Package combat 战斗模块（pitaya 风格组件）
+//
+// 客户端在地牢通关或角色死亡后上报本局数据。服务器做基础反作弊校验、
+// 计算奖励并持久化。同时提供敌人/地牢/流派等只读配置查询与流派解锁。
+//
+// 改造要点：handler 签名统一为 func(ctx, *Req) (*Resp, error)，
+// 玩家身份通过 session.FromContext(ctx).UID() 获取，错误用 protocol.NewBizError 返回。
 package combat
 
 import (
-	"encoding/json"
-	"log"
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
 
-	"game-server/internal/gateway"
 	"game-server/internal/protocol"
+	"game-server/internal/session"
 	"game-server/internal/store"
+
+	"go.uber.org/zap"
+	"gorm.io/gorm"
 )
 
-// Handler 战斗模块处理器
-// 遵循项目统一的 handler 模式：持有 store 引用，方法签名为 (conn, body)
+// Handler 战斗模块处理器（组件）。
 type Handler struct {
 	mysql *store.MySQLStore
 	redis *store.RedisStore
 	cfg   *CombatConfig
 }
 
-// NewHandler 创建战斗模块处理器
+// NewHandler 创建战斗模块处理器。
 func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore) *Handler {
-	return &Handler{
-		mysql: mysql,
-		redis: redis,
-		cfg:   DefaultCombatConfig(),
-	}
+	return &Handler{mysql: mysql, redis: redis, cfg: DefaultCombatConfig()}
 }
 
-// HandleCombatResult 处理战斗结算请求
-// 客户端在地牢通关或角色死亡后上报本局数据。
-// 服务器做基础反作弊校验，计算奖励。
-func (h *Handler) HandleCombatResult(conn *gateway.Connection, body json.RawMessage) {
-	var req protocol.CombatResultReq
-	if err := json.Unmarshal(body, &req); err != nil {
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrInvalidParam,
-			Msg:  "参数解析失败",
-		})
-		return
-	}
-
+// CombatResult 处理战斗结算请求：反作弊校验 -> 计算奖励 -> 持久化 -> 同步排行榜。
+func (h *Handler) CombatResult(ctx context.Context, req *protocol.CombatResultReq) (*protocol.CombatResultResp, error) {
 	// 基础反作弊校验
-	if err := validateCombatResult(&req, h.cfg); err != nil {
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrCombatCheatDetected,
-			Msg:  err.Error(),
-		})
-		return
+	if err := validateCombatResult(req, h.cfg); err != nil {
+		return nil, protocol.NewBizError(protocol.ErrCombatCheatDetected, err.Error())
 	}
 
-	// 计算奖励
+	uid := uidFromCtx(ctx)
 	rewardGold := req.Kills * h.cfg.GoldPerKill
 	rewardExp := req.Kills * h.cfg.ExpPerKill
 
-	// TODO: 更新玩家数据（金币、经验、最高分）
-	// 需要 PlayerStats 表，阶段5实现
+	// 读取或初始化玩家战斗属性
+	stats, err := h.mysql.GetPlayerStats(uid)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		stats = h.defaultStats(uid)
+		if createErr := h.mysql.CreatePlayerStats(stats); createErr != nil {
+			zap.L().Error("创建玩家属性失败", zap.Int64("uid", uid), zap.Error(createErr))
+			return nil, protocol.NewBizError(protocol.ErrInternal, "服务器内部错误")
+		}
+	} else if err != nil {
+		zap.L().Error("查询玩家属性失败", zap.Int64("uid", uid), zap.Error(err))
+		return nil, protocol.NewBizError(protocol.ErrInternal, "服务器内部错误")
+	}
 
-	// TODO: 记录地牢运行历史
-	// 需要 DungeonRun 表，阶段3实现
+	// 原子更新：加金币、加经验、累加击杀与局数（失败仅记日志，不阻断结算）
+	if rewardGold > 0 {
+		if err := h.mysql.AddPlayerGold(uid, rewardGold); err != nil {
+			zap.L().Error("增加金币失败", zap.Int64("uid", uid), zap.Error(err))
+		}
+	}
+	if rewardExp > 0 {
+		if err := h.mysql.AddPlayerExp(uid, rewardExp); err != nil {
+			zap.L().Error("增加经验失败", zap.Int64("uid", uid), zap.Error(err))
+		}
+	}
+	if req.Kills > 0 {
+		if err := h.mysql.IncrementPlayerTotalKills(uid, req.Kills); err != nil {
+			zap.L().Error("累加击杀数失败", zap.Int64("uid", uid), zap.Error(err))
+		}
+	}
+	if err := h.mysql.IncrementPlayerTotalGames(uid); err != nil {
+		zap.L().Error("累加局数失败", zap.Int64("uid", uid), zap.Error(err))
+	}
 
-	conn.SendMessage(protocol.MsgID_CombatResultResp, protocol.CombatResultResp{
+	// 更新最高分（仅高于历史才更新）
+	var bestScore int64
+	if err := h.mysql.UpdatePlayerBestScore(uid, int64(req.Score)); err != nil {
+		zap.L().Error("更新最高分失败", zap.Int64("uid", uid), zap.Error(err))
+	}
+	if updated, err := h.mysql.GetPlayerStats(uid); err == nil {
+		bestScore = updated.BestScore
+	}
+
+	// 保存分数记录（历史查询用途）
+	scoreRecord := &store.ScoreRecord{
+		PlayerID: uid,
+		Score:    int64(req.Score),
+		Metadata: fmt.Sprintf(`{"kills":%d,"survival_time":%.1f,"dungeon_level":%d,"style_id":%d}`,
+			req.Kills, req.SurvivalTime, req.DungeonLevel, req.StyleID),
+	}
+	if err := h.mysql.CreateScoreRecord(scoreRecord); err != nil {
+		zap.L().Error("保存分数记录失败", zap.Int64("uid", uid), zap.Error(err))
+	}
+
+	// 同步提交到 Redis 排行榜
+	if h.redis != nil {
+		nickname := strconv.FormatInt(uid, 10)
+		if err := h.redis.UpdateRank(1, uid, nickname, int64(req.Score)); err != nil {
+			zap.L().Error("提交排行榜失败", zap.Int64("uid", uid), zap.Error(err))
+		}
+	}
+
+	zap.L().Info("战斗结算成功",
+		zap.Int64("uid", uid), zap.Int("score", req.Score), zap.Int("kills", req.Kills),
+		zap.Int("reward_gold", rewardGold), zap.Int("reward_exp", rewardExp))
+
+	return &protocol.CombatResultResp{
 		Success:    true,
 		RewardGold: rewardGold,
 		RewardExp:  rewardExp,
-		BestScore:  int64(req.Score), // 暂时返回本局分数
-	})
+		BestScore:  bestScore,
+	}, nil
 }
 
-// HandleGetEnemyConfigs 返回敌人配置表
-func (h *Handler) HandleGetEnemyConfigs(conn *gateway.Connection, body json.RawMessage) {
-	configs := GetEnemyConfigs()
-	conn.SendMessage(protocol.MsgID_GetEnemyConfigsResp, protocol.GetEnemyConfigsResp{
-		Configs: configs,
-	})
+// GetEnemyConfigs 返回敌人配置表。
+func (h *Handler) GetEnemyConfigs(ctx context.Context, req *protocol.GetEnemyConfigsReq) (*protocol.GetEnemyConfigsResp, error) {
+	return &protocol.GetEnemyConfigsResp{Configs: GetEnemyConfigs()}, nil
 }
 
-// HandleGetDungeonConfig 返回地牢配置
-func (h *Handler) HandleGetDungeonConfig(conn *gateway.Connection, body json.RawMessage) {
-	var req protocol.GetDungeonConfigReq
-	if err := json.Unmarshal(body, &req); err != nil {
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrInvalidParam,
-			Msg:  "参数解析失败",
-		})
-		return
-	}
-
+// GetDungeonConfig 返回指定等级的地牢配置。
+func (h *Handler) GetDungeonConfig(ctx context.Context, req *protocol.GetDungeonConfigReq) (*protocol.GetDungeonConfigResp, error) {
 	if req.Level <= 0 {
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrCombatConfigNotFound,
-			Msg:  "无效的地牢等级",
-		})
-		return
+		return nil, protocol.NewBizError(protocol.ErrCombatConfigNotFound, "无效的地牢等级")
 	}
-
 	cfg := GetDungeonConfig(req.Level)
 	if cfg == nil {
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrCombatConfigNotFound,
-			Msg:  "地牢配置不存在",
-		})
-		return
+		return nil, protocol.NewBizError(protocol.ErrCombatConfigNotFound, "地牢配置不存在")
 	}
-
-	conn.SendMessage(protocol.MsgID_GetDungeonConfigResp, protocol.GetDungeonConfigResp{
+	return &protocol.GetDungeonConfigResp{
 		Level:        cfg.Level,
 		RoomCount:    cfg.RoomCount,
 		EnemyDensity: cfg.EnemyDensity,
 		BossID:       cfg.BossID,
 		EnemyConfigs: GetEnemyConfigs(),
-	})
+	}, nil
 }
 
-// HandleGetStyleConfigs 返回流派配置表
-func (h *Handler) HandleGetStyleConfigs(conn *gateway.Connection, body json.RawMessage) {
-	styles := GetStyleConfigs()
-	conn.SendMessage(protocol.MsgID_GetStyleConfigsResp, protocol.GetStyleConfigsResp{
-		Styles: styles,
-	})
+// GetStyleConfigs 返回流派配置表。
+func (h *Handler) GetStyleConfigs(ctx context.Context, req *protocol.GetStyleConfigsReq) (*protocol.GetStyleConfigsResp, error) {
+	return &protocol.GetStyleConfigsResp{Styles: GetStyleConfigs()}, nil
 }
 
-// HandleUnlockStyle 处理流派解锁请求
-// TODO: 阶段4实现完整逻辑（检查金币、记录解锁状态）
-func (h *Handler) HandleUnlockStyle(conn *gateway.Connection, body json.RawMessage) {
-	var req protocol.UnlockStyleReq
-	if err := json.Unmarshal(body, &req); err != nil {
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrInvalidParam,
-			Msg:  "参数解析失败",
-		})
-		return
+// UnlockStyle 处理流派解锁请求：校验存在性 -> 幂等检查 -> 扣金币 -> 记录解锁。
+func (h *Handler) UnlockStyle(ctx context.Context, req *protocol.UnlockStyleReq) (*protocol.UnlockStyleResp, error) {
+	if getStyleConfig(req.StyleID) == nil {
+		return nil, protocol.NewBizError(protocol.ErrCombatStyleLocked, "流派不存在")
 	}
 
-	// 检查流派是否存在
-	validStyle := false
-	for _, s := range GetStyleConfigs() {
+	uid := uidFromCtx(ctx)
+
+	// 幂等：已解锁则直接返回成功
+	styles, err := h.mysql.GetPlayerStyles(uid)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		zap.L().Error("查询已解锁流派失败", zap.Int64("uid", uid), zap.Error(err))
+	}
+	for _, s := range styles {
 		if s.StyleID == req.StyleID {
-			validStyle = true
-			break
+			return &protocol.UnlockStyleResp{Success: true, GoldCost: 0}, nil
 		}
 	}
-	if !validStyle {
-		conn.SendMessage(protocol.MsgID_Error, protocol.ErrorResp{
-			Code: protocol.ErrCombatStyleLocked,
-			Msg:  "流派不存在",
-		})
-		return
+
+	// 解锁费用：默认 100 金币，流派 1（刀）免费
+	goldCost := 100
+	if req.StyleID == 1 {
+		goldCost = 0
 	}
 
-	// TODO: 检查玩家金币是否足够
-	// TODO: 记录解锁状态到 PlayerStyle 表
-	goldCost := 100 // 暂定解锁费用
+	if goldCost > 0 {
+		if err := h.mysql.DeductPlayerGold(uid, goldCost); err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, protocol.NewBizError(protocol.ErrCombatInsufficientGold, "金币不足")
+			}
+			zap.L().Error("扣除金币失败", zap.Int64("uid", uid), zap.Error(err))
+			return nil, protocol.NewBizError(protocol.ErrInternal, "服务器内部错误")
+		}
+	}
 
-	conn.SendMessage(protocol.MsgID_UnlockStyleResp, protocol.UnlockStyleResp{
-		Success:  true,
-		GoldCost: goldCost,
-	})
+	if err := h.mysql.UnlockPlayerStyle(uid, req.StyleID); err != nil {
+		zap.L().Error("记录流派解锁失败", zap.Int64("uid", uid), zap.Error(err))
+		return nil, protocol.NewBizError(protocol.ErrInternal, "解锁失败")
+	}
 
-	log.Printf("[combat] 玩家解锁流派 style_id=%d, cost=%d", req.StyleID, goldCost)
+	zap.L().Info("流派解锁成功", zap.Int64("uid", uid), zap.Int("style_id", req.StyleID), zap.Int("cost", goldCost))
+	return &protocol.UnlockStyleResp{Success: true, GoldCost: goldCost}, nil
 }
 
-// HandleGetPlayerStats 获取玩家战斗属性
-// TODO: 阶段5实现，从 PlayerStats 表读取
-func (h *Handler) HandleGetPlayerStats(conn *gateway.Connection, body json.RawMessage) {
-	uid := conn.GetUID()
+// GetPlayerStats 获取玩家战斗属性；新玩家返回默认值并自动创建记录。
+func (h *Handler) GetPlayerStats(ctx context.Context, req *protocol.GetPlayerStatsReq) (*protocol.GetPlayerStatsResp, error) {
+	uid := uidFromCtx(ctx)
 
-	// 暂时返回默认值
-	conn.SendMessage(protocol.MsgID_GetPlayerStatsResp, protocol.GetPlayerStatsResp{
-		Level:          1,
-		Exp:            0,
-		Gold:           0,
-		MaxHp:          h.cfg.MaxHp,
-		MaxStamina:     h.cfg.MaxStamina,
-		AttackPower:    h.cfg.BaseAttackPower,
-		UnlockedStyles: []int{1}, // 默认解锁"刃"流派
-	})
+	stats, err := h.mysql.GetPlayerStats(uid)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		stats = h.defaultStats(uid)
+		if createErr := h.mysql.CreatePlayerStats(stats); createErr != nil {
+			zap.L().Error("创建玩家属性失败", zap.Int64("uid", uid), zap.Error(createErr))
+		}
+	} else if err != nil {
+		zap.L().Error("查询玩家属性失败", zap.Int64("uid", uid), zap.Error(err))
+		return nil, protocol.NewBizError(protocol.ErrInternal, "服务器内部错误")
+	}
 
-	log.Printf("[combat] 获取玩家属性 uid=%d", uid)
+	// 已解锁流派；新玩家默认解锁流派 1
+	playerStyles, _ := h.mysql.GetPlayerStyles(uid)
+	unlockedStyleIDs := make([]int, 0, len(playerStyles))
+	for _, s := range playerStyles {
+		unlockedStyleIDs = append(unlockedStyleIDs, s.StyleID)
+	}
+	if len(unlockedStyleIDs) == 0 {
+		unlockedStyleIDs = []int{1}
+		h.mysql.UnlockPlayerStyle(uid, 1)
+	}
+
+	return &protocol.GetPlayerStatsResp{
+		Level:          stats.Level,
+		Exp:            stats.Exp,
+		Gold:           stats.Gold,
+		MaxHp:          stats.MaxHp,
+		MaxStamina:     stats.MaxStamina,
+		AttackPower:    stats.AttackPower,
+		UnlockedStyles: unlockedStyleIDs,
+	}, nil
 }
 
-// HandleUpdatePlayerStats 更新玩家战斗属性
-// TODO: 阶段5实现，写入 PlayerStats 表
-func (h *Handler) HandleUpdatePlayerStats(conn *gateway.Connection, body json.RawMessage) {
-	conn.SendMessage(protocol.MsgID_UpdatePlayerStatsResp, protocol.UpdatePlayerStatsResp{
-		Success: true,
-	})
+// UpdatePlayerStats 全量覆盖更新玩家战斗属性（客户端上报完整快照）。
+func (h *Handler) UpdatePlayerStats(ctx context.Context, req *protocol.UpdatePlayerStatsReq) (*protocol.UpdatePlayerStatsResp, error) {
+	uid := uidFromCtx(ctx)
+
+	// 基础反作弊：数值边界检查
+	if req.Level < 1 || req.Level > 1000 {
+		return nil, protocol.NewBizError(protocol.ErrCombatInvalidResult, "等级数值异常")
+	}
+	if req.MaxHp < 1 || req.MaxHp > 100000 {
+		return nil, protocol.NewBizError(protocol.ErrCombatInvalidResult, "生命值异常")
+	}
+
+	stats, err := h.mysql.GetPlayerStats(uid)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		stats = &store.PlayerStats{PlayerID: uid}
+	} else if err != nil {
+		zap.L().Error("查询玩家属性失败", zap.Int64("uid", uid), zap.Error(err))
+		return nil, protocol.NewBizError(protocol.ErrInternal, "服务器内部错误")
+	}
+
+	stats.Level = req.Level
+	stats.Exp = req.Exp
+	stats.Gold = req.Gold
+	stats.MaxHp = req.MaxHp
+	stats.MaxStamina = req.MaxStamina
+	stats.AttackPower = req.AttackPower
+
+	if err := h.mysql.UpdatePlayerStats(stats); err != nil {
+		zap.L().Error("更新玩家属性失败", zap.Int64("uid", uid), zap.Error(err))
+		return nil, protocol.NewBizError(protocol.ErrInternal, "更新失败")
+	}
+
+	// 同步更新解锁的流派
+	for _, styleID := range req.UnlockedStyles {
+		h.mysql.UnlockPlayerStyle(uid, styleID)
+	}
+
+	return &protocol.UpdatePlayerStatsResp{Success: true}, nil
+}
+
+// defaultStats 构造新玩家的默认战斗属性。
+func (h *Handler) defaultStats(uid int64) *store.PlayerStats {
+	return &store.PlayerStats{
+		PlayerID:    uid,
+		Level:       1,
+		Exp:         0,
+		Gold:        0,
+		MaxHp:       h.cfg.MaxHp,
+		MaxStamina:  h.cfg.MaxStamina,
+		AttackPower: h.cfg.BaseAttackPower,
+	}
+}
+
+// getStyleConfig 根据流派 ID 查找配置，找不到返回 nil。
+func getStyleConfig(styleID int) *protocol.StyleConfigItem {
+	for _, s := range GetStyleConfigs() {
+		if s.StyleID == styleID {
+			return &s
+		}
+	}
+	return nil
+}
+
+// uidFromCtx 从会话取玩家 ID。
+func uidFromCtx(ctx context.Context) int64 {
+	if s := session.FromContext(ctx); s != nil {
+		return s.UID()
+	}
+	return 0
 }

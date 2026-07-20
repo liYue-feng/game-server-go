@@ -103,10 +103,10 @@ func GetDungeonConfig(level int) *protocol.DungeonConfigItem {
 	}
 
 	return &protocol.DungeonConfigItem{
-		Level:         level,
-		RoomCount:     roomCount,
-		EnemyDensity:  enemyDensity,
-		BossID:        4, // 默认Boss
+		Level:        level,
+		RoomCount:    roomCount,
+		EnemyDensity: enemyDensity,
+		BossID:       4, // 默认Boss
 	}
 }
 

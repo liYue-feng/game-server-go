@@ -9,11 +9,11 @@ package protocol
 //   - 4xxxx: 排行榜模块错误
 const (
 	// 通用错误
-	ErrSuccess       = 0     // 成功（非错误，用于判断）
-	ErrInternal      = 10001 // 服务器内部错误
-	ErrInvalidParam  = 10002 // 参数无效
-	ErrTooFrequent   = 10003 // 请求过于频繁
-	ErrUnauthorized  = 10004 // 未授权（未登录或 token 过期）
+	ErrSuccess      = 0     // 成功（非错误，用于判断）
+	ErrInternal     = 10001 // 服务器内部错误
+	ErrInvalidParam = 10002 // 参数无效
+	ErrTooFrequent  = 10003 // 请求过于频繁
+	ErrUnauthorized = 10004 // 未授权（未登录或 token 过期）
 
 	// 登录模块错误
 	ErrLoginInvalidCode  = 20001 // 无效的微信登录 code
@@ -25,14 +25,14 @@ const (
 	ErrArchiveNotFound   = 30002 // 存档不存在（新玩家首次登录不算错误）
 
 	// 排行榜模块错误
-	ErrRankInvalidType = 40001 // 无效的排行榜类型
+	ErrRankInvalidType  = 40001 // 无效的排行榜类型
 	ErrRankInvalidRange = 40002 // 无效的排名范围
 
 	// 战斗模块错误
-	ErrCombatInvalidResult   = 50001 // 战斗结算数据无效
-	ErrCombatCheatDetected   = 50002 // 检测到作弊行为
-	ErrCombatConfigNotFound  = 50003 // 战斗配置不存在
-	ErrCombatStyleLocked     = 50004 // 流派未解锁
+	ErrCombatInvalidResult    = 50001 // 战斗结算数据无效
+	ErrCombatCheatDetected    = 50002 // 检测到作弊行为
+	ErrCombatConfigNotFound   = 50003 // 战斗配置不存在
+	ErrCombatStyleLocked      = 50004 // 流派未解锁
 	ErrCombatInsufficientGold = 50005 // 金币不足
 )
 

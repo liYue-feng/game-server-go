@@ -9,7 +9,7 @@ import "time"
 // Player 玩家账号表
 // 存储玩家的基础信息和认证数据，是最核心的表
 type Player struct {
-	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`         // 用户唯一ID，自增主键
+	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`          // 用户唯一ID，自增主键
 	OpenID    string    `gorm:"uniqueIndex;size:64;not null" json:"open_id"` // 微信 OpenID，唯一标识一个微信用户
 	Nickname  string    `gorm:"size:64;default:''" json:"nickname"`          // 昵称，默认"玩家"+ID
 	AvatarURL string    `gorm:"size:512;default:''" json:"avatar_url"`       // 头像 URL
@@ -44,9 +44,9 @@ func (Archive) TableName() string {
 // 排行榜的实时查询走 Redis Sorted Set，这里做持久化备份
 type ScoreRecord struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	PlayerID  int64     `gorm:"index;not null" json:"player_id"`  // 关联玩家 ID
-	Score     int64     `gorm:"not null" json:"score"`            // 本局分数
-	Metadata  string    `gorm:"type:text;default:''" json:"metadata"` // 附加数据（击杀数、存活时间等）
+	PlayerID  int64     `gorm:"index;not null" json:"player_id"`        // 关联玩家 ID
+	Score     int64     `gorm:"not null" json:"score"`                  // 本局分数
+	Metadata  string    `gorm:"type:text;default:''" json:"metadata"`   // 附加数据（击杀数、存活时间等）
 	CreatedAt time.Time `gorm:"autoCreateTime;index" json:"created_at"` // 用作时间范围查询
 }
 
@@ -59,11 +59,11 @@ func (ScoreRecord) TableName() string {
 // 订单号必须全局唯一，同一订单只能发货一次（幂等保证）
 type PaymentOrder struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
-	OrderNo   string    `gorm:"uniqueIndex;size:64;not null" json:"order_no"`  // 商户订单号，全局唯一
-	PlayerID  int64     `gorm:"index;not null" json:"player_id"`               // 关联玩家 ID
-	ProductID int       `gorm:"not null" json:"product_id"`                    // 商品ID
-	Amount    int64     `gorm:"not null" json:"amount"`                        // 支付金额（单位：分）
-	Status    int       `gorm:"not null;default:0" json:"status"`              // 订单状态：0=待支付 1=已支付 2=已发货 3=已取消 4=已退款
+	OrderNo   string    `gorm:"uniqueIndex;size:64;not null" json:"order_no"` // 商户订单号，全局唯一
+	PlayerID  int64     `gorm:"index;not null" json:"player_id"`              // 关联玩家 ID
+	ProductID int       `gorm:"not null" json:"product_id"`                   // 商品ID
+	Amount    int64     `gorm:"not null" json:"amount"`                       // 支付金额（单位：分）
+	Status    int       `gorm:"not null;default:0" json:"status"`             // 订单状态：0=待支付 1=已支付 2=已发货 3=已取消 4=已退款
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }

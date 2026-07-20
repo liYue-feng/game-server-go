@@ -21,10 +21,12 @@ import (
 // 重新导出 model 类型，业务层只需 import store 即可使用
 // 避免业务层同时依赖 store 和 model 两个包
 type (
-	Player        = model.Player
-	Archive       = model.Archive
-	ScoreRecord   = model.ScoreRecord
-	PaymentOrder  = model.PaymentOrder
+	Player       = model.Player
+	Archive      = model.Archive
+	ScoreRecord  = model.ScoreRecord
+	PaymentOrder = model.PaymentOrder
+	PlayerStats  = model.PlayerStats
+	PlayerStyle  = model.PlayerStyle
 )
 
 // MySQLStore MySQL 数据存储
@@ -65,7 +67,7 @@ func NewMySQLStore(cfg *config.MySQLConfig) (*MySQLStore, error) {
 	// 自动迁移表结构
 	// AutoMigrate 会创建不存在的表和列，但不会删除已有的列（安全）
 	// 生产环境建议使用独立的 migration 工具（如 golang-migrate）
-	if err := db.AutoMigrate(&model.Player{}, &model.Archive{}, &model.ScoreRecord{}, &model.PaymentOrder{}); err != nil {
+	if err := db.AutoMigrate(&model.Player{}, &model.Archive{}, &model.ScoreRecord{}, &model.PaymentOrder{}, &model.PlayerStats{}, &model.PlayerStyle{}); err != nil {
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
 	}
 
@@ -186,4 +188,98 @@ func (s *MySQLStore) GetOrderByOrderNo(orderNo string) (*model.PaymentOrder, err
 func (s *MySQLStore) UpdateOrderStatus(orderNo string, status int) error {
 	return s.db.Model(&model.PaymentOrder{}).Where("order_no = ?", orderNo).
 		Update("status", status).Error
+}
+
+// ========== 玩家战斗属性相关操作 ==========
+
+// GetPlayerStats 根据玩家 ID 查询战斗属性
+// 新玩家首次查询时返回 gorm.ErrRecordNotFound
+func (s *MySQLStore) GetPlayerStats(playerID int64) (*model.PlayerStats, error) {
+	var stats model.PlayerStats
+	err := s.db.Where("player_id = ?", playerID).First(&stats).Error
+	if err != nil {
+		return nil, err
+	}
+	return &stats, nil
+}
+
+// CreatePlayerStats 为新玩家创建初始战斗属性
+func (s *MySQLStore) CreatePlayerStats(stats *model.PlayerStats) error {
+	return s.db.Create(stats).Error
+}
+
+// UpdatePlayerStats 更新玩家战斗属性
+// 使用 Save 全量更新，调用方负责先读取再修改
+func (s *MySQLStore) UpdatePlayerStats(stats *model.PlayerStats) error {
+	return s.db.Save(stats).Error
+}
+
+// AddPlayerGold 原子增加玩家金币（使用 SQL UPDATE 避免并发覆盖）
+func (s *MySQLStore) AddPlayerGold(playerID int64, amount int) error {
+	return s.db.Model(&model.PlayerStats{}).
+		Where("player_id = ?", playerID).
+		Update("gold", gorm.Expr("gold + ?", amount)).Error
+}
+
+// AddPlayerExp 原子增加玩家经验
+func (s *MySQLStore) AddPlayerExp(playerID int64, amount int) error {
+	return s.db.Model(&model.PlayerStats{}).
+		Where("player_id = ?", playerID).
+		Update("exp", gorm.Expr("exp + ?", amount)).Error
+}
+
+// UpdatePlayerBestScore 更新玩家最高分（只有新分数更高时才更新）
+func (s *MySQLStore) UpdatePlayerBestScore(playerID int64, score int64) error {
+	return s.db.Model(&model.PlayerStats{}).
+		Where("player_id = ? AND best_score < ?", playerID, score).
+		Update("best_score", score).Error
+}
+
+// IncrementPlayerTotalKills 累加击杀数
+func (s *MySQLStore) IncrementPlayerTotalKills(playerID int64, kills int) error {
+	return s.db.Model(&model.PlayerStats{}).
+		Where("player_id = ?", playerID).
+		Update("total_kills", gorm.Expr("total_kills + ?", kills)).Error
+}
+
+// IncrementPlayerTotalGames 累加游戏局数
+func (s *MySQLStore) IncrementPlayerTotalGames(playerID int64) error {
+	return s.db.Model(&model.PlayerStats{}).
+		Where("player_id = ?", playerID).
+		Update("total_games", gorm.Expr("total_games + 1")).Error
+}
+
+// ========== 玩家流派相关操作 ==========
+
+// GetPlayerStyles 获取玩家已解锁的流派列表
+func (s *MySQLStore) GetPlayerStyles(playerID int64) ([]model.PlayerStyle, error) {
+	var styles []model.PlayerStyle
+	err := s.db.Where("player_id = ?", playerID).Find(&styles).Error
+	return styles, err
+}
+
+// UnlockPlayerStyle 为玩家解锁一个流派
+// 使用 FirstOrCreate 保证幂等：同一玩家同一流派不会重复解锁
+func (s *MySQLStore) UnlockPlayerStyle(playerID int64, styleID int) error {
+	style := model.PlayerStyle{
+		PlayerID: playerID,
+		StyleID:  styleID,
+	}
+	return s.db.Where("player_id = ? AND style_id = ?", playerID, styleID).
+		FirstOrCreate(&style).Error
+}
+
+// DeductPlayerGold 原子扣除玩家金币（不足时返回错误）
+// 使用 SQL 条件更新避免并发超扣
+func (s *MySQLStore) DeductPlayerGold(playerID int64, amount int) error {
+	result := s.db.Model(&model.PlayerStats{}).
+		Where("player_id = ? AND gold >= ?", playerID, amount).
+		Update("gold", gorm.Expr("gold - ?", amount))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }

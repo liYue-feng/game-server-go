@@ -1,4 +1,4 @@
-# Go 游戏服务器
+﻿# Go 游戏服务器
 
 基于 Go 语言的微信小游戏后端服务器，面向"吸血鬼幸存者"类单机+社交游戏。
 
@@ -9,8 +9,8 @@
 │  微信小游戏  │ ◄──────────────► │         游戏服务器 (Go)              │
 │   客户端     │    :8080/ws      │                                      │
 └─────────────┘                   │  ┌──────────┐  ┌──────────┐         │
-                                  │  │  Gateway  │  │  Router   │         │
-                                  │  │  网关层    │─►│  消息路由  │         │
+                                  │  │ Transport │  │  Kernel   │         │
+                                  │  │ 传输+会话  │─►│ 内核+管道  │         │
                                   │  └──────────┘  └────┬─────┘         │
                                   │                     │               │
                                   │       ┌─────────────┼───────────┐   │
@@ -149,12 +149,20 @@ game_server_go/
 │   ├── protocol/               # 通信协议
 │   │   ├── message.go          #   消息ID + 请求/响应结构体
 │   │   ├── codec.go            #   二进制帧编解码
-│   │   └── common.go           #   错误码定义
-│   ├── gateway/                # 网关层
-│   │   ├── server.go           #   WebSocket 服务器
+│   │   ├── common.go           #   错误码定义
+│   │   └── errors.go           #   BizError 业务错误
+│   ├── session/                # 玩家会话（Bind/UID/Set/Get/Push）
+│   │   └── session.go          #   会话 + ctx 存取
+│   ├── pipeline/               # 处理管道（Before/After 钩子）
+│   │   └── pipeline.go         #   Hooks + ExecuteBefore/After
+│   ├── kernel/                 # 消息内核（注册/反射分发）
+│   │   └── kernel.go           #   Register/Dispatch + AuthFree
+│   ├── transport/              # 传输层（WebSocket 收发）
+│   │   ├── server.go           #   /ws + /health + 优雅关闭
 │   │   ├── hub.go              #   连接管理中心
-│   │   ├── connection.go       #   连接封装 + 读写泵
-│   │   └── router.go           #   消息路由 + 中间件
+│   │   └── connection.go       #   连接封装 + 读写泵
+│   ├── hooks/                  # pipeline 钩子
+│   │   └── hooks.go            #   认证 + 限流
 │   ├── login/                  # 登录模块
 │   │   ├── handler.go          #   登录 + 心跳处理
 │   │   └── wechat.go           #   微信 API 客户端
@@ -167,8 +175,6 @@ game_server_go/
 │   │   └── constants.go        #   订单状态常量
 │   ├── gm/                     # GM指令模块
 │   │   └── handler.go          #   踢人/广播/查询
-│   ├── middleware/              # 中间件
-│   │   └── middleware.go       #   认证 + 限流
 │   ├── model/                  # 数据模型 (GORM)
 │   │   └── player.go           #   Player/Archive/ScoreRecord/PaymentOrder
 │   └── store/                  # 数据存储层
@@ -234,10 +240,11 @@ GAME_REDIS_HOST=10.0.0.1
 
 - [x] Phase 1: 项目骨架 — 目录结构、网关、消息路由、配置
 - [x] Phase 2: 核心业务 — 登录、存档、排行榜、支付、GM
+- [x] Phase 2.5: 参考 pitaya 重构网络层 — kernel（注册/反射分发）+ session（玩家会话）+ pipeline（Before/After 钩子）+ transport（WebSocket 收发），线上协议帧不变、客户端零改动
 - [ ] Phase 3: 生产加固
   - [ ] 单元测试覆盖
   - [ ] 微信支付 V3 完整对接
-  - [ ] 服务器优雅关闭（关闭所有 WebSocket 连接）
+  - [x] 服务器优雅关闭（关闭所有 WebSocket 连接）
   - [ ] 配置热更新
   - [ ] Prometheus 监控指标
   - [ ] 压力测试

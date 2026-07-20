@@ -8,10 +8,10 @@
 //  2. 前端将 code 发送给我们的服务器
 //  3. 我们的服务器调用微信 code2session API：
 //     GET https://api.weixin.qq.com/sns/jscode2session
-//       ?appid=APPID
-//       &secret=APP_SECRET
-//       &js_code=CODE
-//       &grant_type=authorization_code
+//     ?appid=APPID
+//     &secret=APP_SECRET
+//     &js_code=CODE
+//     &grant_type=authorization_code
 //  4. 微信返回 openid（用户唯一标识）和 session_key（会话密钥）
 //  5. 我们用 openid 标识用户，session_key 用于数据解密（暂不使用）
 package login
@@ -30,8 +30,8 @@ import (
 
 // WechatClient 微信 API 客户端
 type WechatClient struct {
-	appID     string
-	appSecret string
+	appID      string
+	appSecret  string
 	httpClient *http.Client // 复用 HTTP 连接，避免每次请求都建 TCP 连接
 }
 

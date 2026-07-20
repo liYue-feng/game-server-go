@@ -1,4 +1,4 @@
-# 游戏服务器配置
+﻿# 游戏服务器配置
 server:
   host: "0.0.0.0"   # 监听地址，0.0.0.0 表示所有网卡
   port: 8080         # WebSocket 监听端口
@@ -25,6 +25,11 @@ mysql:
 wechat:
   app_id: ""         # 小游戏 AppID，从微信公众平台获取
   app_secret: ""     # 小游戏 AppSecret，从微信公众平台获取
+  mch_id: ""         # 微信支付商户号
+  mch_private_key_path: ""  # 商户私钥文件路径（apiv3）
+  mch_cert_serial_no: ""    # 商户证书序列号
+  wechat_pay_cert_path: ""  # 微信支付平台证书文件路径
+  pay_notify_url: ""        # 支付回调通知 URL
 
 # 日志配置
 log:
@@ -33,3 +38,9 @@ log:
   max_size: 200      # 单个日志文件最大 MB
   max_backups: 7     # 保留的旧日志文件最大数量
   max_age: 30        # 保留旧日志文件的最大天数
+
+# GM 指令配置
+gm:
+  # 管理员 UID 白名单，只有列表内的玩家 UID 才能执行 GM 指令（踢人/广播/查询）
+  # 留空表示不开放任何 GM 权限；生产环境按需填入运营账号 UID
+  admin_uids: []

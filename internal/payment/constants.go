@@ -1,9 +1,10 @@
 // Package payment — 支付相关数据模型
 //
 // 订单是支付系统的核心实体，记录每笔支付的全生命周期：
-//   待支付(pending) → 已支付(paid) → 已发货(delivered)
-//                    ↘ 已取消(canceled)
-//                    ↘ 已退款(refunded)
+//
+//	待支付(pending) → 已支付(paid) → 已发货(delivered)
+//	                 ↘ 已取消(canceled)
+//	                 ↘ 已退款(refunded)
 package payment
 
 // 以下类型定义在 store 包中，通过 store.PaymentOrder 使用

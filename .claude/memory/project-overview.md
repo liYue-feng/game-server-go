@@ -1,4 +1,4 @@
----
+﻿---
 name: game-server-go-overview
 description: Go游戏服务器项目概览 — 吸血鬼幸存者类微信小游戏后端
 metadata: 
@@ -22,19 +22,18 @@ Go语言游戏服务器项目，面向"吸血鬼幸存者"类微信小游戏。
 **关键认知**: 吸血鬼幸存者类游戏的逻辑主要跑在客户端，服务器负责登录、存档、排行榜、支付，不是实时对战服务器。
 
 **已完成模块**:
-- 网关层 (gateway): WebSocket服务器、Hub连接管理、消息路由+中间件
+- 网络层（pitaya 风格重构，协议帧不变）：kernel（消息注册 + 反射分发 + 免鉴权选项）、session（玩家会话 Bind/UID/Set/Get/Push）、pipeline（Before/After 钩子链）、transport（WebSocket 收发 connection/hub/server，/ws + /health + 优雅关闭）
 - 登录模块 (login): 微信code2session、心跳
 - 游戏模块 (game): 存档保存/加载
 - 排行榜模块 (rank): Redis Sorted Set
 - 支付模块 (payment): 订单创建、回调处理（签名验证存根）
 - GM指令模块 (gm): 踢人、广播、查询玩家、在线数
-- 中间件 (middleware): 认证、限流
+- 钩子 (hooks): 认证、限流（pipeline Before 钩子，取代旧 middleware）
 - Docker部署: Dockerfile + docker-compose.yml
 
 **待完成**:
 - 单元测试
 - 微信支付V3完整对接
-- 优雅关闭WebSocket连接
 - 配置热更新
 - Prometheus监控
 
