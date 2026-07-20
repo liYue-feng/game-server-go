@@ -36,31 +36,82 @@ Describe 'Generate-Protocol toolchain cache verification' {
 }
 
 Describe 'Generate-Protocol checked-in outputs' {
-    It 'accepts checkout line endings and checks both client outputs' {
-        $backendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
-        $backendParent = Split-Path $backendRoot -Parent
-        $workspaceRoot = Split-Path (Split-Path $backendParent -Parent) -Parent
-        $worktreeName = Split-Path $backendRoot -Leaf
-        $clientRoot = (Resolve-Path (Join-Path $workspaceRoot "game-client-unity\.worktrees\$worktreeName")).Path
-        $csharpOutputs = @(
-            (Join-Path $clientRoot 'tools\protobuf\generated\Messages.cs'),
-            (Join-Path $clientRoot 'Assets\Scripts\Protocol\Generated\Messages.cs')
+    $backendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    $backendParent = Split-Path $backendRoot -Parent
+    $isWorktree = (Split-Path $backendParent -Leaf) -eq '.worktrees'
+    $workspaceRoot = if ($isWorktree) {
+        Split-Path (Split-Path $backendParent -Parent) -Parent
+    }
+    else {
+        $backendParent
+    }
+    $worktreeName = Split-Path $backendRoot -Leaf
+    $candidates = if ($isWorktree) {
+        @(
+            (Join-Path $workspaceRoot "game-client-unity\.worktrees\$worktreeName"),
+            (Join-Path $workspaceRoot 'game-client-unity')
         )
-        $originalContents = @{}
+    }
+    else {
+        @((Join-Path $workspaceRoot 'game-client-unity'))
+    }
+    $sourceClientRoot = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
 
+    if ([string]::IsNullOrWhiteSpace($sourceClientRoot)) {
+        throw 'A sibling game-client-unity checkout is required for generated output tests.'
+    }
+
+    $sourceClientRoot = (Resolve-Path $sourceClientRoot).Path
+    $fixtureRoot = $null
+    $fixtureClientRoot = $null
+
+    BeforeEach {
+        $fixtureRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("protobuf-output-test-" + [Guid]::NewGuid().ToString('N'))
+        $fixtureClientRoot = Join-Path $fixtureRoot 'client'
+        $relativeOutputs = @(
+            'tools\protobuf\generated\Messages.cs',
+            'Assets\Scripts\Protocol\Generated\Messages.cs'
+        )
+
+        foreach ($relativeOutput in $relativeOutputs) {
+            $sourceOutput = Join-Path $sourceClientRoot $relativeOutput
+            $fixtureOutput = Join-Path $fixtureClientRoot $relativeOutput
+            New-Item -ItemType Directory -Force -Path (Split-Path $fixtureOutput -Parent) | Out-Null
+            Copy-Item -LiteralPath $sourceOutput -Destination $fixtureOutput
+        }
+    }
+
+    AfterEach {
+        Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    It 'accepts checkout line endings and checks both client outputs' {
+        $csharpOutputs = @(
+            (Join-Path $fixtureClientRoot 'tools\protobuf\generated\Messages.cs'),
+            (Join-Path $fixtureClientRoot 'Assets\Scripts\Protocol\Generated\Messages.cs')
+        )
+
+        foreach ($output in $csharpOutputs) {
+            $normalizedText = [IO.File]::ReadAllText($output).Replace("`r`n", "`n").Replace("`r", "`n")
+            [IO.File]::WriteAllText($output, $normalizedText.Replace("`n", "`r`n"))
+        }
+
+        { & $scriptPath -ClientRoot $fixtureClientRoot -Check } | Should Not Throw
+    }
+
+    It 'reports semantic drift in the Unity runtime output' {
+        $runtimeOutput = Join-Path $fixtureClientRoot 'Assets\Scripts\Protocol\Generated\Messages.cs'
+        Add-Content -LiteralPath $runtimeOutput -Value '// semantic drift'
+
+        $failure = $null
         try {
-            foreach ($output in $csharpOutputs) {
-                $originalContents[$output] = [IO.File]::ReadAllBytes($output)
-                $normalizedText = [IO.File]::ReadAllText($output).Replace("`r`n", "`n").Replace("`r", "`n")
-                [IO.File]::WriteAllText($output, $normalizedText.Replace("`n", "`r`n"))
-            }
+            & $scriptPath -ClientRoot $fixtureClientRoot -Check
+        }
+        catch {
+            $failure = $_
+        }
 
-            { & $scriptPath -ClientRoot $clientRoot -Check } | Should Not Throw
-        }
-        finally {
-            foreach ($output in $csharpOutputs) {
-                [IO.File]::WriteAllBytes($output, $originalContents[$output])
-            }
-        }
+        $failure | Should Not BeNullOrEmpty
+        $failure.Exception.Message | Should Match ([regex]::Escape($runtimeOutput))
     }
 }
