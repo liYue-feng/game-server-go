@@ -40,6 +40,7 @@
 | Login | 微信登录、心跳保活 | 1001-1099 |
 | Game | 存档保存/加载 | 2001-2099 |
 | Rank | 排行榜查询、分数提交 | 3001-3099 |
+| Combat | 战斗结算、敌人/副本/流派配置、玩家属性 | 4001-4099 |
 | Payment | 创建订单、支付回调 | 5001-5099 |
 | GM | 管理员指令（踢人、广播、查询） | 6001-6099 |
 
@@ -51,7 +52,7 @@
 +-------------------+-------------------+-------------------+
 | Length (4 bytes)  | MsgID  (2 bytes)  | Body   (N bytes)  |
 +-------------------+-------------------+-------------------+
-  小端序 uint32       小端序 uint16        JSON 编码的消息体
+  小端序 uint32       小端序 uint16        protobuf 编码的消息体
 
 Length = 6 + len(Body)
 ```
@@ -62,6 +63,7 @@ Length = 6 + len(Body)
 1xxx  登录模块   1001=登录请求  1002=登录响应  1003=心跳请求  1004=心跳响应
 2xxx  存档模块   2001=保存请求  2002=保存响应  2003=加载请求  2004=加载响应
 3xxx  排行模块   3001=排行请求  3002=排行响应  3003=提交分数  3004=提交响应
+4xxx  战斗模块   4001=战斗结算请求  4002=战斗结算响应  4003-4014=配置/流派/属性
 5xxx  支付模块   5001=创建订单  5002=订单响应  5003=支付结果通知
 6xxx  GM模块     6001=GM指令    6002=GM响应
 9xxx  系统消息   9999=通用错误
@@ -138,19 +140,54 @@ make tidy     # 整理依赖
 make clean    # 清理
 ```
 
+### protobuf 协议生成与校验
+
+`proto/game/v1/messages.proto` 是 32 个线上消息 ID 的唯一协议定义。Go 代码生成到 `internal/protocolpb/messages.pb.go`，Unity C# 代码生成到客户端的 `tools/protobuf/generated/Messages.cs`。
+
+```powershell
+# 在后端仓库执行；ClientRoot 指向配套 Unity 工作区
+powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1 -ClientRoot ..\game-client-unity
+
+# 校验 schema、固定工具版本和 Go/C# 已提交产物没有漂移
+powershell.exe -NoProfile -File tools/protobuf/Verify-Protocol.ps1 -ClientRoot ..\game-client-unity
+```
+
+生成脚本固定使用 `protoc 35.0`、`protoc-gen-go v1.36.11` 和 `Google.Protobuf 3.35.1`，并在使用缓存工具或 NuGet 包前校验 SHA256。
+
+### 内存开发服与真实客户端联调
+
+`configs/config.dev.yaml` 启用隔离的内存开发运行时和 `dev:` 登录，不依赖 MySQL、Redis 或微信登录服务：
+
+```powershell
+go run ./cmd/server -config configs/config.dev.yaml
+go run ./cmd/devprobe
+```
+
+配套 Unity 仓库提供一次性真实后端 runner。它先运行 Go 测试和 `devprobe`，再执行 3 个 Unity PlayMode 用例：protobuf 存档往返、胜利结算持久化、失败结算持久化。
+
+```powershell
+# 在 game-client-unity 仓库执行
+powershell.exe -NoProfile -File tools/integration/Invoke-A4BackendIntegration.ps1 -BackendRoot ..\game-server-go
+```
+
 ## 项目结构
 
 ```
 game_server_go/
-├── cmd/server/main.go          # 入口程序
+├── cmd/server/main.go          # 入口程序（生产/内存开发运行时）
+├── cmd/devprobe/main.go        # protobuf 开发服真实连接探针
 ├── configs/config.yaml         # 配置文件
+├── proto/game/v1/messages.proto # 线上协议唯一 schema
 ├── internal/
 │   ├── config/                 # 配置加载 (Viper)
 │   ├── protocol/               # 通信协议
-│   │   ├── message.go          #   消息ID + 请求/响应结构体
+│   │   ├── ids.go              #   32 个消息 ID
+│   │   ├── message.go          #   generated 类型兼容别名
 │   │   ├── codec.go            #   二进制帧编解码
+│   │   ├── routes.go           #   canonical 请求/响应路由表
 │   │   ├── common.go           #   错误码定义
 │   │   └── errors.go           #   BizError 业务错误
+│   ├── protocolpb/             # protoc 生成的 Go 消息类型
 │   ├── session/                # 玩家会话（Bind/UID/Set/Get/Push）
 │   │   └── session.go          #   会话 + ctx 存取
 │   ├── pipeline/               # 处理管道（Before/After 钩子）
@@ -168,6 +205,9 @@ game_server_go/
 │   │   └── wechat.go           #   微信 API 客户端
 │   ├── game/                   # 游戏模块
 │   │   └── handler.go          #   存档保存/加载
+│   ├── combat/                 # 战斗结算、配置和玩家属性
+│   │   ├── handler.go          #   4001-4014 消息处理
+│   │   └── service.go          #   run_id 结算服务
 │   ├── rank/                   # 排行榜模块
 │   │   └── handler.go          #   排行查询 + 分数提交
 │   ├── payment/                # 支付模块
@@ -176,10 +216,14 @@ game_server_go/
 │   ├── gm/                     # GM指令模块
 │   │   └── handler.go          #   踢人/广播/查询
 │   ├── model/                  # 数据模型 (GORM)
-│   │   └── player.go           #   Player/Archive/ScoreRecord/PaymentOrder
+│   │   ├── player.go           #   Player/Archive/ScoreRecord/PaymentOrder
+│   │   └── combat_settlement.go #  每局结算幂等记录
 │   └── store/                  # 数据存储层
-│       ├── mysql.go            #   MySQL 操作
+│       ├── mysql.go            #   MySQL 操作与 AutoMigrate
+│       ├── mysql_settlement.go #   MySQL 原子战斗结算
+│       ├── settlement.go       #   结算奖励与存档更新规则
 │       └── redis.go            #   Redis 操作（会话/排行/限流）
+├── tools/protobuf/             # 固定版本协议生成与漂移校验
 ├── pkg/logger/                 # 日志封装 (zap + lumberjack)
 │   └── logger.go
 ├── deploy/                     # 部署配置
@@ -212,9 +256,10 @@ GAME_REDIS_HOST=10.0.0.1
 | 表名 | 说明 |
 |------|------|
 | players | 玩家账号（openid、昵称、token、最高分） |
-| archives | 游戏存档（JSON 格式，一个玩家一条） |
+| archives | 游戏存档（`PlayerArchive` protobuf 字节，一个玩家一条） |
 | score_records | 分数记录（每局一条，用于数据分析） |
 | payment_orders | 支付订单（全生命周期：待支付→已支付→已发货） |
+| combat_settlements | 战斗结算响应快照，唯一键 `(player_id, run_id)` 防止重复发奖 |
 
 ### Redis 用途
 
@@ -258,4 +303,5 @@ GAME_REDIS_HOST=10.0.0.1
 | 日志 | uber-go/zap + lumberjack | 结构化日志 + 文件轮转 |
 | 缓存 | go-redis/redis/v8 | 会话/排行榜/限流 |
 | 数据库 | gorm.io/gorm + MySQL | ORM + 关系型存储 |
+| 消息序列化 | google.golang.org/protobuf | Go/Unity 共用 protobuf schema |
 | 部署 | Docker + Docker Compose | 容器化部署 |
