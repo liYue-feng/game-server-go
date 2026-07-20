@@ -44,3 +44,6 @@ temp/
 # 编译输出
 bin/
 dist/
+
+# Isolated feature worktrees
+.worktrees/
