@@ -99,6 +99,30 @@ Describe 'Generate-Protocol checked-in outputs' {
         { & $scriptPath -ClientRoot $fixtureClientRoot -Check } | Should Not Throw
     }
 
+    It 'rejects a standalone carriage return in the staged generated output' {
+        $stagedOutput = Join-Path $fixtureClientRoot 'tools\protobuf\generated\Messages.cs'
+        $text = [IO.File]::ReadAllText($stagedOutput).Replace("`r`n", "`n").Replace("`r", "`n")
+        $firstLineFeed = $text.IndexOf("`n")
+        $firstLineFeed | Should BeGreaterThan -1
+        $bareCarriageReturn = $text.Substring(0, $firstLineFeed) + "`r" + $text.Substring($firstLineFeed + 1)
+        [IO.File]::WriteAllText($stagedOutput, $bareCarriageReturn, (New-Object Text.UTF8Encoding($false)))
+
+        { & $scriptPath -ClientRoot $fixtureClientRoot -Check } | Should Throw
+    }
+
+    It 'rejects a UTF-8 BOM in the staged generated output' {
+        $stagedOutput = Join-Path $fixtureClientRoot 'tools\protobuf\generated\Messages.cs'
+        $content = [IO.File]::ReadAllBytes($stagedOutput)
+        $withBom = New-Object byte[] ($content.Length + 3)
+        $withBom[0] = 0xEF
+        $withBom[1] = 0xBB
+        $withBom[2] = 0xBF
+        [Array]::Copy($content, 0, $withBom, 3, $content.Length)
+        [IO.File]::WriteAllBytes($stagedOutput, $withBom)
+
+        { & $scriptPath -ClientRoot $fixtureClientRoot -Check } | Should Throw
+    }
+
     It 'reports semantic drift in the Unity runtime output' {
         $runtimeOutput = Join-Path $fixtureClientRoot 'Assets\Scripts\Protocol\Generated\Messages.cs'
         Add-Content -LiteralPath $runtimeOutput -Value '// semantic drift'

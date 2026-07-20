@@ -77,10 +77,19 @@ function Assert-FileHash {
     }
 }
 
-function Get-NormalizedGeneratedText {
+function Get-NormalizedGeneratedFingerprint {
     param([string]$Path)
 
-    return [IO.File]::ReadAllText($Path).Replace("`r`n", "`n").Replace("`r", "`n")
+    [byte[]]$source = [IO.File]::ReadAllBytes($Path)
+    $normalized = New-Object 'System.Collections.Generic.List[byte]'
+    for ($index = 0; $index -lt $source.Length; $index++) {
+        if ($source[$index] -eq 0x0D -and $index + 1 -lt $source.Length -and $source[$index + 1] -eq 0x0A) {
+            continue
+        }
+        $normalized.Add($source[$index])
+    }
+
+    return [Convert]::ToBase64String($normalized.ToArray())
 }
 
 function Assert-CommandVersion {
@@ -137,7 +146,7 @@ function Copy-OrCheckGeneratedFile {
         if (-not (Test-Path -LiteralPath $Committed)) {
             throw "Generated file is missing: $Committed"
         }
-        if ((Get-NormalizedGeneratedText -Path $Candidate) -cne (Get-NormalizedGeneratedText -Path $Committed)) {
+        if ((Get-NormalizedGeneratedFingerprint -Path $Candidate) -cne (Get-NormalizedGeneratedFingerprint -Path $Committed)) {
             throw "Generated file differs from the checked-in output: $Committed"
         }
         return
