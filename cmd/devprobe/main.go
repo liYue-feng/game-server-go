@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	probeAddress = "ws://127.0.0.1:8080/ws"
-	archiveData  = `{"phase":"a4","source":"devprobe"}`
-	probeTimeout = 5 * time.Second
+	probeAddress         = "ws://127.0.0.1:8080/ws"
+	probeTimeout         = 5 * time.Second
+	probeSuccessEvidence = "development session probe passed: protobuf login found=false typed save typed reload"
 )
 
 type probe struct {
@@ -25,14 +25,14 @@ type probe struct {
 }
 
 func main() {
-	if err := runProbe(probeAddress, archiveData); err != nil {
+	if err := runProbe(probeAddress); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	fmt.Println("development session probe passed")
+	fmt.Println(probeSuccessEvidence)
 }
 
-func runProbe(address, expectedArchive string) error {
+func runProbe(address string) error {
 	conn, _, err := websocket.DefaultDialer.Dial(address, nil)
 	if err != nil {
 		return fmt.Errorf("dial development server: %w", err)
@@ -47,7 +47,7 @@ func runProbe(address, expectedArchive string) error {
 	if err := p.send(protocol.MsgID_LoginReq, &protocolpb.LoginReq{Code: loginCode}); err != nil {
 		return err
 	}
-	var loginResponse protocol.LoginResp
+	var loginResponse protocolpb.LoginResp
 	if err := p.read(protocol.MsgID_LoginResp, &loginResponse); err != nil {
 		return err
 	}
@@ -61,7 +61,7 @@ func runProbe(address, expectedArchive string) error {
 	if err := p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
 		return err
 	}
-	var initialLoad protocol.LoadArchiveResp
+	var initialLoad protocolpb.LoadArchiveResp
 	if err := p.read(protocol.MsgID_LoadArchiveResp, &initialLoad); err != nil {
 		return err
 	}
@@ -69,10 +69,11 @@ func runProbe(address, expectedArchive string) error {
 		return fmt.Errorf("initial archive unexpectedly found")
 	}
 
-	if err := p.send(protocol.MsgID_SaveArchiveReq, &protocolpb.SaveArchiveReq{Archive: &protocolpb.PlayerArchive{SchemaVersion: 1, TalentPoints: int32(len(expectedArchive))}}); err != nil {
+	expectedArchive := newProbeArchive()
+	if err := p.send(protocol.MsgID_SaveArchiveReq, &protocolpb.SaveArchiveReq{Archive: expectedArchive}); err != nil {
 		return err
 	}
-	var saveResponse protocol.SaveArchiveResp
+	var saveResponse protocolpb.SaveArchiveResp
 	if err := p.read(protocol.MsgID_SaveArchiveResp, &saveResponse); err != nil {
 		return err
 	}
@@ -83,15 +84,30 @@ func runProbe(address, expectedArchive string) error {
 	if err := p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
 		return err
 	}
-	var finalLoad protocol.LoadArchiveResp
+	var finalLoad protocolpb.LoadArchiveResp
 	if err := p.read(protocol.MsgID_LoadArchiveResp, &finalLoad); err != nil {
 		return err
 	}
-	if !finalLoad.Found || finalLoad.Archive.GetTalentPoints() != int32(len(expectedArchive)) {
-		return fmt.Errorf("archive did not round trip")
+	if !finalLoad.Found || !proto.Equal(finalLoad.Archive, expectedArchive) {
+		return fmt.Errorf("archive did not round trip: got %v, want %v", finalLoad.Archive, expectedArchive)
 	}
 
 	return nil
+}
+
+func newProbeArchive() *protocolpb.PlayerArchive {
+	return &protocolpb.PlayerArchive{
+		SchemaVersion:         1,
+		Gold:                  7,
+		Exp:                   11,
+		BestScore:             123,
+		TotalKills:            17,
+		TotalGames:            2,
+		HighestClearedDungeon: 4,
+		TalentPoints:          5,
+		UnlockedStyles:        []int32{1, 3},
+		LastStyleId:           3,
+	}
 }
 
 func newProbeLoginCode() (string, error) {

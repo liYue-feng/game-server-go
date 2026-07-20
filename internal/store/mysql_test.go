@@ -99,7 +99,8 @@ func TestSaveArchiveBuildsAtomicPlayerIDUpsert(t *testing.T) {
 		t.Fatalf("gorm.Open() error = %v", err)
 	}
 
-	statement := saveArchiveQuery(db, &Archive{ID: 777, PlayerID: 42, Data: []byte(`{"gold":7}`)})
+	protobufBytes := []byte{0x08, 0x01, 0x10, 0x07, 0x4a, 0x02, 0x01, 0x03}
+	statement := saveArchiveQuery(db, &Archive{ID: 777, PlayerID: 42, Data: protobufBytes})
 	if statement.Error != nil {
 		t.Fatalf("saveArchiveQuery() error = %v", statement.Error)
 	}
@@ -124,6 +125,19 @@ func TestSaveArchiveBuildsAtomicPlayerIDUpsert(t *testing.T) {
 	conflictClause := sql[strings.Index(sql, "on duplicate key update"):]
 	if strings.Count(conflictClause, "=values(") != 2 {
 		t.Fatalf("SaveArchive conflict clause = %q, want only data and updated_at assignments", conflictClause)
+	}
+	if len(statement.Statement.Vars) == 0 {
+		t.Fatal("SaveArchive query has no bound values")
+	}
+	var boundProtobufBytes []byte
+	for _, value := range statement.Statement.Vars {
+		if data, ok := value.([]byte); ok && bytes.Equal(data, protobufBytes) {
+			boundProtobufBytes = data
+			break
+		}
+	}
+	if boundProtobufBytes == nil {
+		t.Fatalf("SaveArchive bindings = %#v, want protobuf bytes %#v", statement.Statement.Vars, protobufBytes)
 	}
 }
 
