@@ -73,7 +73,7 @@ func TestMemoryDevelopmentStoreSettlesDuplicateOnceWithStableArchive(t *testing.
 	if err != nil {
 		t.Fatalf("first Settle() error = %v", err)
 	}
-	if first.Duplicate || first.RewardGold != 20 || first.RewardExp != 40 {
+	if first.Duplicate || first.RewardGold != 20 || first.RewardExp != 40 || first.RunId != "stable-run" {
 		t.Fatalf("first response = %#v, want first settlement rewards", first)
 	}
 	if first.Archive == nil || first.Archive.TalentPoints != 5 || !proto.Equal(first.Archive, &protocolpb.PlayerArchive{
@@ -98,12 +98,18 @@ func TestMemoryDevelopmentStoreSettlesDuplicateOnceWithStableArchive(t *testing.
 	if !duplicate.Duplicate {
 		t.Fatal("duplicate response has Duplicate = false, want true")
 	}
+	if duplicate.RunId != "stable-run" {
+		t.Fatalf("duplicate run ID = %q, want stable-run", duplicate.RunId)
+	}
 	duplicateAgain, err := developmentStore.Settle(7, settlementRequest("stable-run", protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY))
 	if err != nil {
 		t.Fatalf("second duplicate Settle() error = %v", err)
 	}
 	if !proto.Equal(duplicate, duplicateAgain) {
 		t.Fatalf("duplicate responses differ: first=%v second=%v", duplicate, duplicateAgain)
+	}
+	if duplicateAgain.RunId != "stable-run" {
+		t.Fatalf("stored duplicate run ID = %q, want stable-run", duplicateAgain.RunId)
 	}
 	firstBytes, err := proto.MarshalOptions{Deterministic: true}.Marshal(duplicate)
 	if err != nil {

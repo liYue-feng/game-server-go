@@ -47,7 +47,7 @@ func TestMySQLSettlementDuplicateConflictRollsBackAndReturnsStoredSnapshot(t *te
 	repository := NewMySQLCombatSettlementRepository(&MySQLStore{db: db}, CombatRewardPolicy{GoldPerKill: 5, ExpPerKill: 10})
 	req := settlementRequest("duplicate-mysql-run", protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY)
 	stored := &protocolpb.CombatResultResp{
-		Success: true, RewardGold: 20, RewardExp: 40, BestScore: 321,
+		Success: true, RunId: req.RunId, RewardGold: 20, RewardExp: 40, BestScore: 321,
 		Archive: &protocolpb.PlayerArchive{SchemaVersion: 1, Gold: 20, Exp: 40, BestScore: 321, TotalKills: 4, TotalGames: 1, HighestClearedDungeon: 3, LastStyleId: 3},
 	}
 	storedBytes, err := proto.Marshal(stored)
@@ -81,6 +81,9 @@ func TestMySQLSettlementDuplicateConflictRollsBackAndReturnsStoredSnapshot(t *te
 	}
 	if !response.Duplicate {
 		t.Fatal("duplicate response has Duplicate = false, want true")
+	}
+	if response.RunId != req.RunId {
+		t.Fatalf("stored duplicate run ID = %q, want %q", response.RunId, req.RunId)
 	}
 	response.Duplicate = false
 	if !proto.Equal(response, stored) {

@@ -47,6 +47,7 @@ func settleArchive(archive *protocolpb.PlayerArchive, req *protocolpb.CombatResu
 
 	return &protocolpb.CombatResultResp{
 		Success:    true,
+		RunId:      req.RunId,
 		RewardGold: int32(gold),
 		RewardExp:  int32(exp),
 		BestScore:  archive.BestScore,

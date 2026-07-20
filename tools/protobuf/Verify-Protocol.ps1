@@ -55,6 +55,7 @@ $schema = Get-Content -LiteralPath $schemaPath -Raw
     'message ScoreMetadata {',
     'message CombatResultReq {',
     'BattleOutcome outcome = 7;',
+	'string run_id = 7;',
     'bytes args_json = 2;'
 ) | ForEach-Object { Assert-Contains -Content $schema -Expected $_ }
 

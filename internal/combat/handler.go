@@ -143,6 +143,7 @@ func (h *Handler) CombatResult(ctx context.Context, req *protocolpb.CombatResult
 
 	return &protocolpb.CombatResultResp{
 		Success:    true,
+		RunId:      req.RunId,
 		RewardGold: int32(rewardGold),
 		RewardExp:  int32(rewardExp),
 		BestScore:  bestScore,

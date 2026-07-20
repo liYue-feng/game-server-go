@@ -66,7 +66,7 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 		combatRequests++
 		mu.Unlock()
 		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, &protocolpb.CombatResultResp{
-			Success: true, Duplicate: duplicate, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
+			Success: true, Duplicate: duplicate, RunId: combat.RunId, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
 		})
 		if err := readProbeMessage(conn, protocol.MsgID_CombatResultReq, combat); err != nil {
 			return
@@ -75,7 +75,7 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 		combatRequests++
 		mu.Unlock()
 		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, &protocolpb.CombatResultResp{
-			Success: true, Duplicate: true, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
+			Success: true, Duplicate: true, RunId: combat.RunId, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
 		})
 	}))
 	defer server.Close()

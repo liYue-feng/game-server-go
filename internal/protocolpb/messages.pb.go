@@ -1161,6 +1161,7 @@ type CombatResultResp struct {
 	RewardExp     int32                  `protobuf:"varint,4,opt,name=reward_exp,json=rewardExp,proto3" json:"reward_exp,omitempty"`
 	BestScore     int64                  `protobuf:"varint,5,opt,name=best_score,json=bestScore,proto3" json:"best_score,omitempty"`
 	Archive       *PlayerArchive         `protobuf:"bytes,6,opt,name=archive,proto3" json:"archive,omitempty"`
+	RunId         string                 `protobuf:"bytes,7,opt,name=run_id,json=runId,proto3" json:"run_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1235,6 +1236,13 @@ func (x *CombatResultResp) GetArchive() *PlayerArchive {
 		return x.Archive
 	}
 	return nil
+}
+
+func (x *CombatResultResp) GetRunId() string {
+	if x != nil {
+		return x.RunId
+	}
+	return ""
 }
 
 type EnemyConfigItem struct {
@@ -2623,7 +2631,7 @@ const file_game_v1_messages_proto_rawDesc = "" +
 	"durationMs\x12\x19\n" +
 	"\bstyle_id\x18\x06 \x01(\x05R\astyleId\x129\n" +
 	"\aoutcome\x18\a \x01(\x0e2\x1f.game.protocol.v1.BattleOutcomeR\aoutcome\x12!\n" +
-	"\fplayer_level\x18\b \x01(\x05R\vplayerLevel\"\xe4\x01\n" +
+	"\fplayer_level\x18\b \x01(\x05R\vplayerLevel\"\xfb\x01\n" +
 	"\x10CombatResultResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1c\n" +
 	"\tduplicate\x18\x02 \x01(\bR\tduplicate\x12\x1f\n" +
@@ -2633,7 +2641,8 @@ const file_game_v1_messages_proto_rawDesc = "" +
 	"reward_exp\x18\x04 \x01(\x05R\trewardExp\x12\x1d\n" +
 	"\n" +
 	"best_score\x18\x05 \x01(\x03R\tbestScore\x129\n" +
-	"\aarchive\x18\x06 \x01(\v2\x1f.game.protocol.v1.PlayerArchiveR\aarchive\"\xb5\x01\n" +
+	"\aarchive\x18\x06 \x01(\v2\x1f.game.protocol.v1.PlayerArchiveR\aarchive\x12\x15\n" +
+	"\x06run_id\x18\a \x01(\tR\x05runId\"\xb5\x01\n" +
 	"\x0fEnemyConfigItem\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x05R\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x0e\n" +
