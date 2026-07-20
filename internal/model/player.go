@@ -46,7 +46,7 @@ type ScoreRecord struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	PlayerID  int64     `gorm:"index;not null" json:"player_id"`        // 关联玩家 ID
 	Score     int64     `gorm:"not null" json:"score"`                  // 本局分数
-	Metadata  string    `gorm:"type:text;default:''" json:"metadata"`   // 附加数据（击杀数、存活时间等）
+	Metadata  string    `gorm:"type:text" json:"metadata"`              // 附加数据（击杀数、存活时间等）
 	CreatedAt time.Time `gorm:"autoCreateTime;index" json:"created_at"` // 用作时间范围查询
 }
 
