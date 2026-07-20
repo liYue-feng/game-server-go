@@ -47,7 +47,7 @@ func TestMySQLSettlementDuplicateConflictRollsBackAndReturnsStoredSnapshot(t *te
 	repository := NewMySQLCombatSettlementRepository(&MySQLStore{db: db}, CombatRewardPolicy{GoldPerKill: 5, ExpPerKill: 10})
 	req := settlementRequest("duplicate-mysql-run", protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY)
 	stored := &protocolpb.CombatResultResp{
-		Success: true, RunId: req.RunId, RewardGold: 20, RewardExp: 40, BestScore: 321,
+		Success: true, RewardGold: 20, RewardExp: 40, BestScore: 321,
 		Archive: &protocolpb.PlayerArchive{SchemaVersion: 1, Gold: 20, Exp: 40, BestScore: 321, TotalKills: 4, TotalGames: 1, HighestClearedDungeon: 3, LastStyleId: 3},
 	}
 	storedBytes, err := proto.Marshal(stored)
@@ -85,9 +85,56 @@ func TestMySQLSettlementDuplicateConflictRollsBackAndReturnsStoredSnapshot(t *te
 	if response.RunId != req.RunId {
 		t.Fatalf("stored duplicate run ID = %q, want %q", response.RunId, req.RunId)
 	}
-	response.Duplicate = false
-	if !proto.Equal(response, stored) {
+	want := proto.Clone(stored).(*protocolpb.CombatResultResp)
+	want.Duplicate = true
+	want.RunId = req.RunId
+	if !proto.Equal(response, want) {
 		t.Fatalf("stored snapshot changed: got %v want %v", response, stored)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("MySQL transaction expectations: %v", err)
+	}
+}
+
+func TestMySQLSettlementExistingDuplicateBackfillsRunIDFromLegacySnapshot(t *testing.T) {
+	sqlDB, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+	repository := NewMySQLCombatSettlementRepository(&MySQLStore{db: db}, CombatRewardPolicy{GoldPerKill: 5, ExpPerKill: 10})
+	req := settlementRequest("legacy-existing-mysql-run", protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY)
+	legacy := &protocolpb.CombatResultResp{
+		Success: true, RewardGold: 20, RewardExp: 40, BestScore: 321,
+		Archive: &protocolpb.PlayerArchive{SchemaVersion: 1, Gold: 20, Exp: 40},
+	}
+	legacyBytes, err := proto.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy response: %v", err)
+	}
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT \\* FROM `players`.*FOR UPDATE").
+		WithArgs(int64(21), 1).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(21))
+	mock.ExpectQuery("SELECT \\* FROM `combat_settlements`").
+		WithArgs(int64(21), req.RunId, 1).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "player_id", "run_id", "response", "created_at"}).AddRow(1, 21, req.RunId, legacyBytes, time.Now()))
+	mock.ExpectCommit()
+
+	response, err := repository.Settle(21, req)
+	if err != nil {
+		t.Fatalf("Settle() error = %v", err)
+	}
+	if !response.Duplicate {
+		t.Fatal("legacy duplicate response has Duplicate = false, want true")
+	}
+	if response.RunId != req.RunId {
+		t.Fatalf("legacy duplicate run ID = %q, want current request %q", response.RunId, req.RunId)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("MySQL transaction expectations: %v", err)

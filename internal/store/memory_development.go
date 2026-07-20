@@ -191,6 +191,7 @@ func (s *MemoryDevelopmentStore) Settle(playerID int64, req *protocolpb.CombatRe
 			return nil, fmt.Errorf("decode stored settlement: %w", err)
 		}
 		response.Duplicate = true
+		response.RunId = req.RunId
 		return response, nil
 	}
 

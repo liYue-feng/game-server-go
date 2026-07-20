@@ -54,6 +54,7 @@ func (r *MySQLCombatSettlementRepository) Settle(playerID int64, req *protocolpb
 				return decodeErr
 			}
 			stored.Duplicate = true
+			stored.RunId = req.RunId
 			response = stored
 			return nil
 		}
@@ -109,6 +110,7 @@ func (r *MySQLCombatSettlementRepository) Settle(playerID int64, req *protocolpb
 			return nil, decodeErr
 		}
 		stored.Duplicate = true
+		stored.RunId = req.RunId
 		return stored, nil
 	}
 	if err != nil {

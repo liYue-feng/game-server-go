@@ -124,6 +124,31 @@ func TestMemoryDevelopmentStoreSettlesDuplicateOnceWithStableArchive(t *testing.
 	}
 }
 
+func TestMemoryDevelopmentStoreDuplicateBackfillsRunIDFromLegacySnapshot(t *testing.T) {
+	developmentStore := NewMemoryDevelopmentStoreWithSettlementPolicy(CombatRewardPolicy{GoldPerKill: 5, ExpPerKill: 10})
+	req := settlementRequest("legacy-memory-run", protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY)
+	legacy := &protocolpb.CombatResultResp{
+		Success: true, RewardGold: 20, RewardExp: 40, BestScore: 321,
+		Archive: &protocolpb.PlayerArchive{SchemaVersion: 1, Gold: 20, Exp: 40},
+	}
+	legacyBytes, err := proto.Marshal(legacy)
+	if err != nil {
+		t.Fatalf("marshal legacy response: %v", err)
+	}
+	developmentStore.settlements[memorySettlementKey{playerID: 7, runID: req.RunId}] = legacyBytes
+
+	response, err := developmentStore.Settle(7, req)
+	if err != nil {
+		t.Fatalf("Settle() error = %v", err)
+	}
+	if !response.Duplicate {
+		t.Fatal("legacy duplicate response has Duplicate = false, want true")
+	}
+	if response.RunId != req.RunId {
+		t.Fatalf("legacy duplicate run ID = %q, want current request %q", response.RunId, req.RunId)
+	}
+}
+
 func TestMemoryDevelopmentStoreDefeatDoesNotAdvanceHighestClearedDungeon(t *testing.T) {
 	developmentStore := NewMemoryDevelopmentStoreWithSettlementPolicy(CombatRewardPolicy{GoldPerKill: 5, ExpPerKill: 10})
 	response, err := developmentStore.Settle(9, settlementRequest("defeat-run", protocolpb.BattleOutcome_BATTLE_OUTCOME_DEFEAT))
