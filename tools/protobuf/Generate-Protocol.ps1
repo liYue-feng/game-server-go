@@ -45,6 +45,7 @@ $ClientRoot = (Resolve-Path $ClientRoot).Path
 $schemaPath = Join-Path $backendRoot 'proto\game\v1\messages.proto'
 $goOutputPath = Join-Path $backendRoot 'internal\protocolpb\messages.pb.go'
 $csharpOutputPath = Join-Path $ClientRoot 'tools\protobuf\generated\Messages.cs'
+$csharpRuntimeOutputPath = Join-Path $ClientRoot 'Assets\Scripts\Protocol\Generated\Messages.cs'
 $toolchainRoot = Join-Path $env:TEMP 'game-protobuf-toolchain'
 
 function Get-PinnedProtoc {
@@ -74,6 +75,12 @@ function Assert-FileHash {
     if ($actual -ne $Expected) {
         throw "SHA256 mismatch for $Description at '$Path': expected $Expected, got $actual. Delete the cached file and rerun generation."
     }
+}
+
+function Get-NormalizedGeneratedText {
+    param([string]$Path)
+
+    return [IO.File]::ReadAllText($Path).Replace("`r`n", "`n").Replace("`r", "`n")
 }
 
 function Assert-CommandVersion {
@@ -130,7 +137,7 @@ function Copy-OrCheckGeneratedFile {
         if (-not (Test-Path -LiteralPath $Committed)) {
             throw "Generated file is missing: $Committed"
         }
-        if ((Get-FileHash -Algorithm SHA256 -LiteralPath $Candidate).Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath $Committed).Hash) {
+        if ((Get-NormalizedGeneratedText -Path $Candidate) -cne (Get-NormalizedGeneratedText -Path $Committed)) {
             throw "Generated file differs from the checked-in output: $Committed"
         }
         return
@@ -161,6 +168,7 @@ try {
 
     Copy-OrCheckGeneratedFile -Candidate (Join-Path $temporaryRoot 'internal\protocolpb\messages.pb.go') -Committed $goOutputPath
     Copy-OrCheckGeneratedFile -Candidate (Join-Path $temporaryRoot 'Messages.cs') -Committed $csharpOutputPath
+    Copy-OrCheckGeneratedFile -Candidate (Join-Path $temporaryRoot 'Messages.cs') -Committed $csharpRuntimeOutputPath
 }
 finally {
     Remove-Item -LiteralPath $temporaryRoot -Recurse -Force -ErrorAction SilentlyContinue

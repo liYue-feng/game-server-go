@@ -34,3 +34,33 @@ Describe 'Generate-Protocol toolchain cache verification' {
         $failure.Exception.Message | Should Match 'SHA256 mismatch'
     }
 }
+
+Describe 'Generate-Protocol checked-in outputs' {
+    It 'accepts checkout line endings and checks both client outputs' {
+        $backendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+        $backendParent = Split-Path $backendRoot -Parent
+        $workspaceRoot = Split-Path (Split-Path $backendParent -Parent) -Parent
+        $worktreeName = Split-Path $backendRoot -Leaf
+        $clientRoot = (Resolve-Path (Join-Path $workspaceRoot "game-client-unity\.worktrees\$worktreeName")).Path
+        $csharpOutputs = @(
+            (Join-Path $clientRoot 'tools\protobuf\generated\Messages.cs'),
+            (Join-Path $clientRoot 'Assets\Scripts\Protocol\Generated\Messages.cs')
+        )
+        $originalContents = @{}
+
+        try {
+            foreach ($output in $csharpOutputs) {
+                $originalContents[$output] = [IO.File]::ReadAllBytes($output)
+                $normalizedText = [IO.File]::ReadAllText($output).Replace("`r`n", "`n").Replace("`r", "`n")
+                [IO.File]::WriteAllText($output, $normalizedText.Replace("`n", "`r`n"))
+            }
+
+            { & $scriptPath -ClientRoot $clientRoot -Check } | Should Not Throw
+        }
+        finally {
+            foreach ($output in $csharpOutputs) {
+                [IO.File]::WriteAllBytes($output, $originalContents[$output])
+            }
+        }
+    }
+}
