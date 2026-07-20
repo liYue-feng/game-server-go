@@ -71,6 +71,66 @@ func TestWechatCode2SessionTransportErrorIsSafeAndUnwrapsCause(t *testing.T) {
 	}
 }
 
+func TestWechatCode2SessionRejectsNon2xxWithoutLeakingResponse(t *testing.T) {
+	logs := observeDebugLogs(t)
+	const secret = "secret-upstream-body"
+	client := newWechatResponseClient(http.StatusServiceUnavailable,
+		`{"openid":"looks-valid","session_key":"`+secret+`","errcode":0}`)
+
+	result, err := client.Code2Session("prod-code")
+	if err == nil || result != nil {
+		t.Fatalf("Code2Session() = %#v, %v; want safe upstream error", result, err)
+	}
+	if errors.Is(err, ErrInvalidLoginCode) {
+		t.Fatalf("Code2Session() error = %v, non-2xx must be upstream failure", err)
+	}
+	if !errors.Is(err, ErrWechatUpstreamResponse) {
+		t.Fatalf("Code2Session() error = %v, want upstream response classification", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("non-2xx error leaked response body: %v", err)
+	}
+	assertObservedLogsExclude(t, logs, secret)
+}
+
+func TestWechatCode2SessionRejectsSuccessfulResponseWithoutOpenID(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		body string
+	}{
+		{name: "missing", body: `{}`},
+		{name: "whitespace", body: `{"openid":" \t "}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := observeDebugLogs(t)
+			result, err := newWechatResponseClient(http.StatusOK, tt.body).Code2Session("prod-code")
+			if err == nil || result != nil {
+				t.Fatalf("Code2Session() = %#v, %v; want missing identity error", result, err)
+			}
+			if errors.Is(err, ErrInvalidLoginCode) {
+				t.Fatalf("Code2Session() error = %v, malformed success response is upstream failure", err)
+			}
+			if !errors.Is(err, ErrWechatIdentityMissing) || !errors.Is(err, ErrWechatUpstreamResponse) {
+				t.Fatalf("Code2Session() error = %v, want missing upstream identity classification", err)
+			}
+			entries := logs.FilterMessage("微信 code2session 响应").All()
+			if len(entries) != 1 || entries[0].ContextMap()["hasOpenID"] != false {
+				t.Fatalf("missing identity logs = %#v, want one hasOpenID=false entry", logs.AllUntimed())
+			}
+		})
+	}
+}
+
+func newWechatResponseClient(status int, body string) *WechatClient {
+	return &WechatClient{
+		appID:     "app-id",
+		appSecret: "app-secret",
+		httpClient: &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body))}, nil
+		})},
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {

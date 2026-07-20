@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -33,6 +34,14 @@ import (
 	"game-server/pkg/logger"
 
 	"go.uber.org/zap"
+)
+
+const (
+	maxPaymentCallbackBodySize int64 = 1 << 20
+	callbackReadHeaderTimeout        = 5 * time.Second
+	callbackReadTimeout              = 10 * time.Second
+	callbackWriteTimeout             = 10 * time.Second
+	callbackIdleTimeout              = 60 * time.Second
 )
 
 type runtime struct {
@@ -233,16 +242,35 @@ func newPaymentCallbackServer(appRuntime *runtime) *http.Server {
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/pay/callback", func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/pay/callback", newPaymentCallbackHandler(appRuntime.paymentHandler.HandlePayCallback))
+
+	return &http.Server{
+		Addr:              ":8081",
+		Handler:           mux,
+		ReadHeaderTimeout: callbackReadHeaderTimeout,
+		ReadTimeout:       callbackReadTimeout,
+		WriteTimeout:      callbackWriteTimeout,
+		IdleTimeout:       callbackIdleTimeout,
+	}
+}
+
+func newPaymentCallbackHandler(handle func([]byte) (*payment.CallbackResp, error)) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer r.Body.Close()
+		r.Body = http.MaxBytesReader(w, r.Body, maxPaymentCallbackBodySize)
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
+			var maxBytesError *http.MaxBytesError
+			if errors.As(err, &maxBytesError) {
+				http.Error(w, "payment callback body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
 			zap.L().Error("read payment callback body", zap.Error(err))
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		response, err := appRuntime.paymentHandler.HandlePayCallback(body)
+		response, err := handle(body)
 		if err != nil {
 			zap.L().Error("handle payment callback", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
@@ -256,6 +284,4 @@ func newPaymentCallbackServer(appRuntime *runtime) *http.Server {
 		}
 		_, _ = w.Write(payload)
 	})
-
-	return &http.Server{Addr: ":8081", Handler: mux}
 }

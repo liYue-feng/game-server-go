@@ -9,6 +9,8 @@ import (
 var (
 	ErrInvalidLoginCode        = errors.New("invalid login code")
 	ErrDevelopmentCodeRejected = fmt.Errorf("%w: development login code rejected", ErrInvalidLoginCode)
+	ErrWechatUpstreamResponse  = errors.New("wechat upstream response invalid")
+	ErrWechatIdentityMissing   = fmt.Errorf("%w: openid missing", ErrWechatUpstreamResponse)
 )
 
 type LoginIdentity struct {
@@ -35,12 +37,20 @@ func (e *DevelopmentCodeExchanger) Exchange(code string) (LoginIdentity, error) 
 	return LoginIdentity{OpenID: code}, nil
 }
 
+type wechatCode2SessionClient interface {
+	Code2Session(code string) (*Code2SessionResult, error)
+}
+
 type WechatCodeExchanger struct {
-	client *WechatClient
+	client wechatCode2SessionClient
 }
 
 func NewWechatCodeExchanger(client *WechatClient) *WechatCodeExchanger {
-	return &WechatCodeExchanger{client: client}
+	var sessionClient wechatCode2SessionClient
+	if client != nil {
+		sessionClient = client
+	}
+	return &WechatCodeExchanger{client: sessionClient}
 }
 
 func (e *WechatCodeExchanger) Exchange(code string) (LoginIdentity, error) {
@@ -57,6 +67,9 @@ func (e *WechatCodeExchanger) Exchange(code string) (LoginIdentity, error) {
 	result, err := e.client.Code2Session(code)
 	if err != nil {
 		return LoginIdentity{}, err
+	}
+	if result == nil || strings.TrimSpace(result.OpenID) == "" {
+		return LoginIdentity{}, ErrWechatIdentityMissing
 	}
 	return LoginIdentity{OpenID: result.OpenID}, nil
 }

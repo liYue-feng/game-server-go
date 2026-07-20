@@ -8,6 +8,9 @@ package store
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"time"
 
 	"game-server/internal/config"
 	"game-server/internal/model"
@@ -43,12 +46,8 @@ type MySQLStore struct {
 //  2. 配置连接池参数（控制资源使用）
 //  3. 自动迁移表结构（开发阶段用，生产环境应使用 migration 工具）
 func NewMySQLStore(cfg *config.MySQLConfig) (*MySQLStore, error) {
-	// GORM 日志配置：开发阶段打印所有 SQL，生产环境只打印慢查询和错误
-	logLevel := gormlogger.Info
-	// TODO: 根据 config.Log.Level 动态调整
-
 	db, err := gorm.Open(mysql.Open(cfg.DSN()), &gorm.Config{
-		Logger: gormlogger.Default.LogMode(logLevel),
+		Logger: newMySQLGORMLogger(log.New(os.Stdout, "\r\n", log.LstdFlags)),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("连接 MySQL 失败: %w", err)
@@ -80,6 +79,14 @@ func NewMySQLStore(cfg *config.MySQLConfig) (*MySQLStore, error) {
 	zap.L().Info("MySQL 初始化成功", zap.String("dsn", maskPassword(cfg.DSN())))
 
 	return &MySQLStore{db: db}, nil
+}
+
+func newMySQLGORMLogger(writer gormlogger.Writer) gormlogger.Interface {
+	return gormlogger.New(writer, gormlogger.Config{
+		SlowThreshold:        200 * time.Millisecond,
+		LogLevel:             gormlogger.Warn,
+		ParameterizedQueries: true,
+	})
 }
 
 func validateAndCloseOnFailure(validate func() error, closeResource func() error) error {

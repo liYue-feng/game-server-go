@@ -4,14 +4,61 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"game-server/internal/config"
+	"game-server/internal/payment"
 	"game-server/internal/protocol"
 	"game-server/internal/session"
 	"game-server/internal/store"
 )
+
+func TestPaymentCallbackRejectsOversizedBodyWithoutCallingHandler(t *testing.T) {
+	callbackCalls := 0
+	handler := newPaymentCallbackHandler(func([]byte) (*payment.CallbackResp, error) {
+		callbackCalls++
+		return &payment.CallbackResp{}, nil
+	})
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/pay/callback",
+		strings.NewReader(strings.Repeat("x", int(maxPaymentCallbackBodySize)+1)),
+	)
+	response := httptest.NewRecorder()
+
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("callback status = %d, want %d", response.Code, http.StatusRequestEntityTooLarge)
+	}
+	if callbackCalls != 0 {
+		t.Fatalf("payment callback calls = %d, want 0", callbackCalls)
+	}
+}
+
+func TestPaymentCallbackServerConfiguresTimeouts(t *testing.T) {
+	server := newPaymentCallbackServer(&runtime{paymentHandler: &payment.Handler{}})
+	if server == nil {
+		t.Fatal("newPaymentCallbackServer() = nil for production runtime")
+	}
+
+	if server.ReadHeaderTimeout != 5*time.Second {
+		t.Errorf("ReadHeaderTimeout = %v, want 5s", server.ReadHeaderTimeout)
+	}
+	if server.ReadTimeout != 10*time.Second {
+		t.Errorf("ReadTimeout = %v, want 10s", server.ReadTimeout)
+	}
+	if server.WriteTimeout != 10*time.Second {
+		t.Errorf("WriteTimeout = %v, want 10s", server.WriteTimeout)
+	}
+	if server.IdleTimeout != 60*time.Second {
+		t.Errorf("IdleTimeout = %v, want 60s", server.IdleTimeout)
+	}
+}
 
 type runtimeCaptureConn struct {
 	frames [][]byte

@@ -30,6 +30,8 @@ var (
 )
 
 const (
+	// WebSocket 单条消息上限为 4 MiB，包含完整应用层协议帧（6 字节帧头和消息体）。
+	maxWebSocketMessageSize int64 = 4 * 1024 * 1024
 	// 写超时：发送消息到客户端的最大等待时间
 	writeWait = 10 * time.Second
 	// Pong 超时：等待客户端 pong 响应的最大时间，超过视为掉线
@@ -146,6 +148,7 @@ func (c *Connection) readPump() {
 		c.stop()
 	}()
 
+	c.conn.SetReadLimit(maxWebSocketMessageSize)
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
 	// 每次收到 pong 就刷新读超时，这是 WebSocket 心跳的标准做法。
 	c.conn.SetPongHandler(func(string) error {

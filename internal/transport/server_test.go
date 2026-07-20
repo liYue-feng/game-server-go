@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -16,6 +17,8 @@ import (
 )
 
 const lifecycleTestTimeout = 3 * time.Second
+
+const oversizedWebSocketMessageSize = 4*1024*1024 + 1
 
 func TestServerShutdownBeforeStartReturns(t *testing.T) {
 	server := NewServer(kernel.New(nil))
@@ -150,6 +153,50 @@ func TestServerShutdownWaitsForActiveHandlerAndClosesConnection(t *testing.T) {
 	assertAddressReusable(t, addr)
 }
 
+func TestServerRejectsWebSocketMessageOverReadLimit(t *testing.T) {
+	server := NewServer(kernel.New(nil))
+	addr := freeAddress(t)
+	startDone := startServer(t, server, addr)
+	ws := dialWebSocket(t, addr)
+
+	waitForOnlineCount(t, server.Hub(), 1)
+
+	// The WebSocket message is one byte beyond the intended 4 MiB envelope.
+	// Its size includes the complete six-byte application protocol header.
+	oversizedFrame := make([]byte, oversizedWebSocketMessageSize)
+	binary.LittleEndian.PutUint32(oversizedFrame[0:4], uint32(len(oversizedFrame)))
+	binary.LittleEndian.PutUint16(oversizedFrame[4:6], protocol.MsgID_HeartbeatReq)
+
+	writeErr := ws.WriteMessage(websocket.BinaryMessage, oversizedFrame)
+	var response []byte
+	var readErr error
+	if writeErr == nil {
+		if err := ws.SetReadDeadline(time.Now().Add(lifecycleTestTimeout)); err != nil {
+			t.Fatalf("set oversized message read deadline: %v", err)
+		}
+		_, response, readErr = ws.ReadMessage()
+	}
+
+	rejected := writeErr != nil || readErr != nil
+	_ = ws.Close()
+	waitForOnlineCount(t, server.Hub(), 0)
+	assertServerHealthy(t, addr)
+
+	server.Shutdown()
+	if err := waitForError(t, startDone, "Start after oversized message Shutdown"); !errors.Is(err, http.ErrServerClosed) {
+		t.Fatalf("Start error = %v, want %v", err, http.ErrServerClosed)
+	}
+	assertAddressReusable(t, addr)
+
+	if !rejected {
+		message, decodeErr := protocol.Decode(response)
+		if decodeErr == nil && message.MsgID == protocol.MsgID_Error {
+			t.Fatal("oversized WebSocket message was read and dispatched as a protocol error instead of closing the connection")
+		}
+		t.Fatal("oversized WebSocket message did not close the connection")
+	}
+}
+
 func startServer(t *testing.T, server *Server, addr string) <-chan error {
 	t.Helper()
 
@@ -213,6 +260,33 @@ func assertAddressReusable(t *testing.T, addr string) {
 	if err := listener.Close(); err != nil {
 		t.Fatalf("close reused address %s: %v", addr, err)
 	}
+}
+
+func assertServerHealthy(t *testing.T, addr string) {
+	t.Helper()
+
+	client := &http.Client{Timeout: lifecycleTestTimeout}
+	response, err := client.Get("http://" + addr + "/health")
+	if err != nil {
+		t.Fatalf("health request after connection cleanup: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("health status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+}
+
+func waitForOnlineCount(t *testing.T, hub *Hub, want int) {
+	t.Helper()
+
+	deadline := time.Now().Add(lifecycleTestTimeout)
+	for time.Now().Before(deadline) {
+		if hub.OnlineCount() == want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("online count = %d, want %d", hub.OnlineCount(), want)
 }
 
 func waitForSignal(t *testing.T, signal <-chan struct{}, operation string) {

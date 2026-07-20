@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"game-server/internal/config"
@@ -80,6 +81,10 @@ func (c *WechatClient) Code2Session(code string) (*Code2SessionResult, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取微信响应失败: %w", err)
 	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		zap.L().Debug("微信 code2session 响应", zap.Int("status", resp.StatusCode))
+		return nil, fmt.Errorf("%w: HTTP status %d", ErrWechatUpstreamResponse, resp.StatusCode)
+	}
 
 	// 解析 JSON
 	var result Code2SessionResult
@@ -89,7 +94,7 @@ func (c *WechatClient) Code2Session(code string) (*Code2SessionResult, error) {
 	zap.L().Debug("微信 code2session 响应",
 		zap.Int("status", resp.StatusCode),
 		zap.Int("errCode", result.ErrCode),
-		zap.Bool("hasOpenID", result.OpenID != ""),
+		zap.Bool("hasOpenID", strings.TrimSpace(result.OpenID) != ""),
 	)
 
 	// 检查微信返回的错误码
@@ -99,6 +104,9 @@ func (c *WechatClient) Code2Session(code string) (*Code2SessionResult, error) {
 	//   - -1: 系统繁忙
 	if result.ErrCode != 0 {
 		return nil, wechatAPIError(result)
+	}
+	if strings.TrimSpace(result.OpenID) == "" {
+		return nil, ErrWechatIdentityMissing
 	}
 
 	return &result, nil

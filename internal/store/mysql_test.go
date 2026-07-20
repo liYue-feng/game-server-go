@@ -2,15 +2,68 @@ package store
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	gormlogger "gorm.io/gorm/logger"
 )
+
+func TestUnparameterizedGORMLoggerInterpolatesSensitiveValues(t *testing.T) {
+	const secret = "secret-open-id-and-token"
+	var queryLog bytes.Buffer
+	unsafeLogger := gormlogger.New(log.New(&queryLog, "", 0), gormlogger.Config{
+		LogLevel: gormlogger.Error,
+	})
+
+	traceGORMError(t, unsafeLogger, secret)
+
+	if !strings.Contains(queryLog.String(), secret) {
+		t.Fatalf("unparameterized GORM log = %q, want proof that sensitive value is interpolated", queryLog.String())
+	}
+}
+
+func TestMySQLGORMLoggerKeepsSensitiveValuesParameterized(t *testing.T) {
+	const secret = "secret-open-id-and-token"
+	var queryLog bytes.Buffer
+	productionLogger := newMySQLGORMLogger(log.New(&queryLog, "", 0))
+
+	renderedSQL := traceGORMError(t, productionLogger, secret)
+	logOutput := queryLog.String()
+
+	if strings.Contains(renderedSQL, secret) || strings.Contains(logOutput, secret) {
+		t.Fatalf("parameterized GORM output exposed secret: sql=%q log=%q", renderedSQL, logOutput)
+	}
+	if !strings.Contains(renderedSQL, "open_id = ?") || !strings.Contains(renderedSQL, "token = ?") {
+		t.Fatalf("parameterized SQL = %q, want diagnostic statement with placeholders", renderedSQL)
+	}
+	if !strings.Contains(logOutput, "query failed") || !strings.Contains(logOutput, "SELECT * FROM players") {
+		t.Fatalf("GORM error log = %q, want error and SQL diagnostic", logOutput)
+	}
+}
+
+func traceGORMError(t *testing.T, sqlLogger gormlogger.Interface, secret string) string {
+	t.Helper()
+	const statement = "SELECT * FROM players WHERE open_id = ? AND token = ?"
+	filter, ok := sqlLogger.(interface {
+		ParamsFilter(context.Context, string, ...interface{}) (string, []interface{})
+	})
+	if !ok {
+		t.Fatal("GORM logger does not implement ParamsFilter")
+	}
+	filteredSQL, filteredParams := filter.ParamsFilter(context.Background(), statement, secret, secret)
+	dialector := mysql.New(mysql.Config{SkipInitializeWithVersion: true})
+	renderedSQL := dialector.Explain(filteredSQL, filteredParams...)
+	sqlLogger.Trace(context.Background(), time.Now(), func() (string, int64) {
+		return renderedSQL, 0
+	}, errors.New("query failed"))
+	return renderedSQL
+}
 
 func TestValidateAndCloseOnFailureClosesMySQLOnceAndPreservesMigrationError(t *testing.T) {
 	migrationErr := errors.New("migration failed")
