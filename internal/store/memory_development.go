@@ -135,6 +135,7 @@ func (s *MemoryDevelopmentStore) GetArchive(playerID int64) (*Archive, error) {
 	if !ok {
 		return nil, fmt.Errorf("archive for player %d: %w", playerID, ErrNotFound)
 	}
+	archive.Data = append([]byte(nil), archive.Data...)
 	return &archive, nil
 }
 
@@ -146,7 +147,9 @@ func (s *MemoryDevelopmentStore) SaveArchive(archive *Archive) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.archivesByUID[archive.PlayerID] = *archive
+	stored := *archive
+	stored.Data = append([]byte(nil), archive.Data...)
+	s.archivesByUID[stored.PlayerID] = stored
 	return nil
 }
 

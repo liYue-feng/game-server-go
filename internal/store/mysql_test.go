@@ -99,7 +99,7 @@ func TestSaveArchiveBuildsAtomicPlayerIDUpsert(t *testing.T) {
 		t.Fatalf("gorm.Open() error = %v", err)
 	}
 
-	statement := saveArchiveQuery(db, &Archive{ID: 777, PlayerID: 42, Data: `{"gold":7}`})
+	statement := saveArchiveQuery(db, &Archive{ID: 777, PlayerID: 42, Data: []byte(`{"gold":7}`)})
 	if statement.Error != nil {
 		t.Fatalf("saveArchiveQuery() error = %v", statement.Error)
 	}

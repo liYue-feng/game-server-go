@@ -22,6 +22,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 var (
@@ -82,7 +83,7 @@ func (c *Connection) Session() *session.Session {
 // 线程安全：真正写 WebSocket 的动作由 writePump goroutine 完成。
 // 非阻塞投递：缓冲区满说明客户端处理不过来，丢弃该消息而非阻塞，
 // 否则会拖垮服务器 goroutine。
-func (c *Connection) SendMessage(msgID uint16, payload interface{}) error {
+func (c *Connection) SendMessage(msgID uint16, payload proto.Message) error {
 	data, err := protocol.Encode(msgID, payload)
 	if err != nil {
 		return err

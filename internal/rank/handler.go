@@ -11,10 +11,13 @@ package rank
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 	"game-server/internal/session"
 	"game-server/internal/store"
 
@@ -33,7 +36,7 @@ func NewHandler(redis *store.RedisStore, mysql *store.MySQLStore) *Handler {
 }
 
 // GetRank 处理获取排行榜请求。
-func (h *Handler) GetRank(ctx context.Context, req *protocol.GetRankReq) (*protocol.GetRankResp, error) {
+func (h *Handler) GetRank(ctx context.Context, req *protocolpb.GetRankReq) (*protocolpb.GetRankResp, error) {
 	// 参数校验与默认值
 	if req.Count <= 0 || req.Count > 100 {
 		req.Count = 100
@@ -42,15 +45,19 @@ func (h *Handler) GetRank(ctx context.Context, req *protocol.GetRankReq) (*proto
 		req.Start = 0
 	}
 
+	start, stop, err := rankWindow(req.Start, req.Count)
+	if err != nil {
+		return nil, protocol.NewBizError(protocol.ErrRankInvalidRange, "invalid rank range")
+	}
 	// 从 Redis 读取排行榜（按分数从高到低）
-	results, err := h.redis.GetRank(req.RankType, req.Start, req.Start+req.Count-1)
+	results, err := h.redis.GetRank(int(req.RankType), start, stop)
 	if err != nil {
 		zap.L().Error("获取排行榜失败", zap.Error(err))
 		return nil, protocol.NewBizError(protocol.ErrInternal, "获取排行榜失败")
 	}
 
 	// member 格式为 "uid:nickname"（在 UpdateRank 时约定）
-	ranks := make([]protocol.RankItem, 0, len(results))
+	ranks := make([]*protocolpb.RankItem, 0, len(results))
 	for i, z := range results {
 		member, ok := z.Member.(string)
 		if !ok {
@@ -61,23 +68,37 @@ func (h *Handler) GetRank(ctx context.Context, req *protocol.GetRankReq) (*proto
 		if stats, err := h.mysql.GetPlayerStats(uid); err == nil {
 			level = stats.Level
 		}
-		ranks = append(ranks, protocol.RankItem{
+		ranks = append(ranks, &protocolpb.RankItem{
 			Uid:      uid,
 			Nickname: nickname,
-			Level:    level,
+			Level:    int32(level),
 			Score:    int64(z.Score),
-			Rank:     req.Start + i + 1,
+			Rank:     req.Start + int32(i) + 1,
 		})
 	}
 
-	zap.L().Debug("获取排行榜", zap.Int("rankType", req.RankType), zap.Int("count", len(ranks)))
-	return &protocol.GetRankResp{Ranks: ranks}, nil
+	zap.L().Debug("获取排行榜", zap.Int("rankType", int(req.RankType)), zap.Int("count", len(ranks)))
+	return &protocolpb.GetRankResp{Ranks: ranks}, nil
+}
+
+func rankWindow(start, count int32) (int, int, error) {
+	if count <= 0 || count > 100 {
+		count = 100
+	}
+	if start < 0 {
+		start = 0
+	}
+	stop := int64(start) + int64(count) - 1
+	if stop > math.MaxInt32 {
+		return 0, 0, fmt.Errorf("rank range overflows int32")
+	}
+	return int(start), int(stop), nil
 }
 
 // SubmitScore 处理提交分数请求。
 //
 // 流程：校验分数 -> 更新 Redis 排行榜 -> 异步写 MySQL 历史 -> 刷新最高分 -> 返回最高分。
-func (h *Handler) SubmitScore(ctx context.Context, req *protocol.SubmitScoreReq) (*protocol.SubmitScoreResp, error) {
+func (h *Handler) SubmitScore(ctx context.Context, req *protocolpb.SubmitScoreReq) (*protocolpb.SubmitScoreResp, error) {
 	uid := uidFromCtx(ctx)
 
 	// 基础防作弊：分数不能为负
@@ -100,7 +121,11 @@ func (h *Handler) SubmitScore(ctx context.Context, req *protocol.SubmitScoreReq)
 
 	// 异步写入 MySQL 历史记录（归档用途，不阻塞响应）
 	go func() {
-		record := &store.ScoreRecord{PlayerID: uid, Score: req.Score, Metadata: req.Metadata}
+		metadata := ""
+		if req.Metadata != nil {
+			metadata = req.Metadata.String()
+		}
+		record := &store.ScoreRecord{PlayerID: uid, Score: req.Score, Metadata: metadata}
 		if err := h.mysql.CreateScoreRecord(record); err != nil {
 			zap.L().Error("写入分数记录失败", zap.Error(err))
 		}
@@ -115,7 +140,7 @@ func (h *Handler) SubmitScore(ctx context.Context, req *protocol.SubmitScoreReq)
 		bestScore = player.BestScore
 	}
 
-	return &protocol.SubmitScoreResp{Success: true, BestScore: bestScore}, nil
+	return &protocolpb.SubmitScoreResp{Success: true, BestScore: bestScore}, nil
 }
 
 // parseMember 解析 Redis Sorted Set 的 member 字段，格式 "uid:nickname"。

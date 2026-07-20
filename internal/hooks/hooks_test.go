@@ -7,14 +7,17 @@ import (
 
 	"game-server/internal/kernel"
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 	"game-server/internal/session"
 	"game-server/internal/store"
 )
 
 func TestAuthAllowsAuthFreeMessagesWithoutSession(t *testing.T) {
 	k := kernel.New(nil)
-	k.Register(0, 0, func(context.Context, *struct{}) (*struct{}, error) { return &struct{}{}, nil }, kernel.AuthFree())
-	ctx, in, err := Auth(store.NewMemoryDevelopmentStore(), k)(context.Background(), "request")
+	k.Register(protocol.MsgID_HeartbeatReq, protocol.MsgID_HeartbeatResp, func(context.Context, *protocolpb.HeartbeatReq) (*protocolpb.HeartbeatResp, error) {
+		return &protocolpb.HeartbeatResp{}, nil
+	}, kernel.AuthFree())
+	ctx, in, err := Auth(store.NewMemoryDevelopmentStore(), k)(kernel.WithMsgID(context.Background(), protocol.MsgID_HeartbeatReq), "request")
 	if err != nil || ctx == nil || in != "request" {
 		t.Fatalf("Auth(auth-free) = %v, %v, %v; want unchanged context/input", ctx, in, err)
 	}

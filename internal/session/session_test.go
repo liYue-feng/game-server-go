@@ -3,16 +3,20 @@ package session
 import (
 	"context"
 	"testing"
+
+	"game-server/internal/protocolpb"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // fakeConn 是 Conn 的测试替身：记录最后一次发送的 msgID 与 payload。
 type fakeConn struct {
 	lastMsgID   uint16
-	lastPayload interface{}
+	lastPayload proto.Message
 	sendCount   int
 }
 
-func (f *fakeConn) SendMessage(msgID uint16, payload interface{}) error {
+func (f *fakeConn) SendMessage(msgID uint16, payload proto.Message) error {
 	f.lastMsgID = msgID
 	f.lastPayload = payload
 	f.sendCount++
@@ -53,10 +57,11 @@ func TestSetGet(t *testing.T) {
 func TestPush(t *testing.T) {
 	conn := &fakeConn{}
 	s := New(conn)
-	if err := s.Push(1002, "hello"); err != nil {
+	payload := &protocolpb.HeartbeatResp{Timestamp: 1}
+	if err := s.Push(1002, payload); err != nil {
 		t.Fatalf("Push 出错: %v", err)
 	}
-	if conn.lastMsgID != 1002 || conn.lastPayload != "hello" {
+	if conn.lastMsgID != 1002 || conn.lastPayload != payload {
 		t.Fatalf("Push 未正确转发到 Conn: msgID=%d payload=%v", conn.lastMsgID, conn.lastPayload)
 	}
 }

@@ -13,6 +13,8 @@ package session
 import (
 	"context"
 	"sync"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // Conn 是 Session 依赖的底层连接能力（由 transport 层实现）。
@@ -20,7 +22,7 @@ import (
 type Conn interface {
 	// SendMessage 把 payload 按 msgID 编码为协议帧并发送给客户端。
 	// 线程安全由实现方保证（生产实现走 send channel + writePump）。
-	SendMessage(msgID uint16, payload interface{}) error
+	SendMessage(msgID uint16, payload proto.Message) error
 }
 
 // Session 玩家会话。
@@ -90,7 +92,7 @@ func (s *Session) GetString(key string) string {
 
 // Push 服务器主动向客户端推送一帧消息。
 // 对齐 pitaya 的 session.Push：用于支付结果通知、广播等场景。
-func (s *Session) Push(msgID uint16, payload interface{}) error {
+func (s *Session) Push(msgID uint16, payload proto.Message) error {
 	return s.conn.SendMessage(msgID, payload)
 }
 

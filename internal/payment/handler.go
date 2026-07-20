@@ -24,6 +24,7 @@ import (
 
 	"game-server/internal/config"
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 	"game-server/internal/session"
 	"game-server/internal/store"
 
@@ -51,23 +52,23 @@ func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore, cfg *config.We
 // CreateOrder 处理创建订单请求（WebSocket）。
 //
 // 为什么不客户端直接下单？价格由服务器控制、客户端无法篡改；所有订单服务端有记录。
-func (h *Handler) CreateOrder(ctx context.Context, req *CreateOrderReq) (*CreateOrderResp, error) {
+func (h *Handler) CreateOrder(ctx context.Context, req *protocolpb.CreateOrderReq) (*protocolpb.CreateOrderResp, error) {
 	uid := uidFromCtx(ctx)
 
 	// 查找商品信息
-	product, ok := ProductMap[req.ProductID]
+	product, ok := ProductMap[int(req.ProductId)]
 	if !ok {
 		return nil, protocol.NewBizError(protocol.ErrInvalidParam, "商品不存在")
 	}
 
 	// 生成唯一订单号：时间戳 + 用户ID + 商品ID
-	orderNo := generateOrderNo(uid, req.ProductID)
+	orderNo := generateOrderNo(uid, int(req.ProductId))
 
 	// 创建订单记录（价格由服务器决定，不信任客户端）
 	order := &store.PaymentOrder{
 		OrderNo:   orderNo,
 		PlayerID:  uid,
-		ProductID: req.ProductID,
+		ProductID: int(req.ProductId),
 		Amount:    product.Price,
 		Status:    store.OrderStatusPending,
 	}
@@ -79,8 +80,8 @@ func (h *Handler) CreateOrder(ctx context.Context, req *CreateOrderReq) (*Create
 	// TODO: 调用微信统一下单 API 获取预支付参数（需商户号、证书等配置）。
 	// 目前先返回订单号，真实预支付参数需对接微信后生成。
 
-	zap.L().Info("创建订单成功", zap.Int64("uid", uid), zap.String("orderNo", orderNo), zap.Int("productID", req.ProductID))
-	return &CreateOrderResp{OrderNo: orderNo}, nil
+	zap.L().Info("创建订单成功", zap.Int64("uid", uid), zap.String("orderNo", orderNo), zap.Int32("productID", req.ProductId))
+	return &protocolpb.CreateOrderResp{OrderNo: orderNo}, nil
 }
 
 // HandlePayCallback 处理微信支付回调通知（HTTP，非 WebSocket）。
@@ -162,15 +163,6 @@ func uidFromCtx(ctx context.Context) int64 {
 // ========== 请求/响应结构体 ==========
 
 // CreateOrderReq 创建订单请求
-type CreateOrderReq struct {
-	ProductID int `json:"product_id"` // 商品ID，见 ProductMap
-}
-
-// CreateOrderResp 创建订单响应
-type CreateOrderResp struct {
-	OrderNo string `json:"order_no"` // 订单号，用于后续支付和查询
-}
-
 // CallbackNotify 微信支付回调通知结构（简化版）
 type CallbackNotify struct {
 	OrderNo string `json:"order_no"` // 商户订单号

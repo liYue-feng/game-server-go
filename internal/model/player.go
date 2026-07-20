@@ -30,7 +30,7 @@ func (Player) TableName() string {
 type Archive struct {
 	ID        int64     `gorm:"primaryKey;autoIncrement" json:"id"`
 	PlayerID  int64     `gorm:"uniqueIndex;not null" json:"player_id"` // 关联玩家 ID，一个玩家一个存档
-	Data      string    `gorm:"type:text;not null" json:"data"`        // 存档数据，JSON 字符串
+	Data      []byte    `gorm:"type:blob;not null" json:"data"`
 	CreatedAt time.Time `gorm:"autoCreateTime" json:"created_at"`
 	UpdatedAt time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }

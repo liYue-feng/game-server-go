@@ -6,7 +6,7 @@
 //   - 持久化玩家战斗属性
 package combat
 
-import "game-server/internal/protocol"
+import "game-server/internal/protocolpb"
 
 // ========== 战斗参数配置 ==========
 
@@ -47,10 +47,10 @@ func DefaultCombatConfig() *CombatConfig {
 
 // GetEnemyConfigs 返回所有敌人类型配置
 // 初期硬编码，后续从数据库/配置文件加载
-func GetEnemyConfigs() []protocol.EnemyConfigItem {
-	return []protocol.EnemyConfigItem{
+func GetEnemyConfigs() []*protocolpb.EnemyConfigItem {
+	return []*protocolpb.EnemyConfigItem{
 		{
-			ID:          1,
+			Id:          1,
 			Name:        "杂兵",
 			Hp:          30,
 			Damage:      10,
@@ -59,7 +59,7 @@ func GetEnemyConfigs() []protocol.EnemyConfigItem {
 			EnemyType:   "grunt",
 		},
 		{
-			ID:          2,
+			Id:          2,
 			Name:        "弓手",
 			Hp:          20,
 			Damage:      8,
@@ -68,7 +68,7 @@ func GetEnemyConfigs() []protocol.EnemyConfigItem {
 			EnemyType:   "archer",
 		},
 		{
-			ID:          3,
+			Id:          3,
 			Name:        "精英",
 			Hp:          80,
 			Damage:      20,
@@ -77,7 +77,7 @@ func GetEnemyConfigs() []protocol.EnemyConfigItem {
 			EnemyType:   "elite",
 		},
 		{
-			ID:          4,
+			Id:          4,
 			Name:        "Boss",
 			Hp:          300,
 			Damage:      25,
@@ -91,7 +91,7 @@ func GetEnemyConfigs() []protocol.EnemyConfigItem {
 // ========== 地牢配置表 ==========
 
 // GetDungeonConfig 返回指定等级的地牢配置
-func GetDungeonConfig(level int) *protocol.DungeonConfigItem {
+func GetDungeonConfig(level int) *protocolpb.DungeonConfigItem {
 	// 基础配置，随等级线性增长
 	roomCount := 8 + level*2
 	if roomCount > 20 {
@@ -102,21 +102,21 @@ func GetDungeonConfig(level int) *protocol.DungeonConfigItem {
 		enemyDensity = 3.0
 	}
 
-	return &protocol.DungeonConfigItem{
-		Level:        level,
-		RoomCount:    roomCount,
-		EnemyDensity: enemyDensity,
-		BossID:       4, // 默认Boss
+	return &protocolpb.DungeonConfigItem{
+		Level:        int32(level),
+		RoomCount:    int32(roomCount),
+		EnemyDensity: float32(enemyDensity),
+		BossId:       4, // 默认Boss
 	}
 }
 
 // ========== 流派配置表 ==========
 
 // GetStyleConfigs 返回所有流派配置
-func GetStyleConfigs() []protocol.StyleConfigItem {
-	return []protocol.StyleConfigItem{
+func GetStyleConfigs() []*protocolpb.StyleConfigItem {
+	return []*protocolpb.StyleConfigItem{
 		{
-			StyleID:             1,
+			StyleId:             1,
 			StyleName:           "刃",
 			DamageMult:          1.0,
 			SpeedMult:           1.2,
@@ -128,7 +128,7 @@ func GetStyleConfigs() []protocol.StyleConfigItem {
 			Description:         "高速连击流派，刃风暴消耗怒气",
 		},
 		{
-			StyleID:             2,
+			StyleId:             2,
 			StyleName:           "印",
 			DamageMult:          0.8,
 			SpeedMult:           1.0,
@@ -140,7 +140,7 @@ func GetStyleConfigs() []protocol.StyleConfigItem {
 			Description:         "弹反强化流派，弹反放置印记可引爆",
 		},
 		{
-			StyleID:             3,
+			StyleId:             3,
 			StyleName:           "毒",
 			DamageMult:          0.6,
 			SpeedMult:           1.0,
@@ -152,7 +152,7 @@ func GetStyleConfigs() []protocol.StyleConfigItem {
 			Description:         "持续伤害流派，攻击叠毒，毒雾范围DoT",
 		},
 		{
-			StyleID:             4,
+			StyleId:             4,
 			StyleName:           "血",
 			DamageMult:          1.5,
 			SpeedMult:           0.8,
@@ -164,7 +164,7 @@ func GetStyleConfigs() []protocol.StyleConfigItem {
 			Description:         "高风险高回报流派，血祭扣HP换爆发伤害",
 		},
 		{
-			StyleID:             5,
+			StyleId:             5,
 			StyleName:           "剑",
 			DamageMult:          1.2,
 			SpeedMult:           1.0,

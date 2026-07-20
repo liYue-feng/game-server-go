@@ -3,14 +3,15 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"time"
 
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -43,7 +44,7 @@ func runProbe(address, expectedArchive string) error {
 	if err != nil {
 		return err
 	}
-	if err := p.send(protocol.MsgID_LoginReq, protocol.LoginReq{Code: loginCode}); err != nil {
+	if err := p.send(protocol.MsgID_LoginReq, &protocolpb.LoginReq{Code: loginCode}); err != nil {
 		return err
 	}
 	var loginResponse protocol.LoginResp
@@ -57,18 +58,18 @@ func runProbe(address, expectedArchive string) error {
 		return fmt.Errorf("login token is empty")
 	}
 
-	if err := p.send(protocol.MsgID_LoadArchiveReq, protocol.LoadArchiveReq{}); err != nil {
+	if err := p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
 		return err
 	}
 	var initialLoad protocol.LoadArchiveResp
 	if err := p.read(protocol.MsgID_LoadArchiveResp, &initialLoad); err != nil {
 		return err
 	}
-	if initialLoad.Data != "" {
-		return fmt.Errorf("initial archive data = %q, want empty", initialLoad.Data)
+	if initialLoad.Found {
+		return fmt.Errorf("initial archive unexpectedly found")
 	}
 
-	if err := p.send(protocol.MsgID_SaveArchiveReq, protocol.SaveArchiveReq{Data: expectedArchive}); err != nil {
+	if err := p.send(protocol.MsgID_SaveArchiveReq, &protocolpb.SaveArchiveReq{Archive: &protocolpb.PlayerArchive{SchemaVersion: 1, TalentPoints: int32(len(expectedArchive))}}); err != nil {
 		return err
 	}
 	var saveResponse protocol.SaveArchiveResp
@@ -79,15 +80,15 @@ func runProbe(address, expectedArchive string) error {
 		return fmt.Errorf("archive save success = false")
 	}
 
-	if err := p.send(protocol.MsgID_LoadArchiveReq, protocol.LoadArchiveReq{}); err != nil {
+	if err := p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
 		return err
 	}
 	var finalLoad protocol.LoadArchiveResp
 	if err := p.read(protocol.MsgID_LoadArchiveResp, &finalLoad); err != nil {
 		return err
 	}
-	if finalLoad.Data != expectedArchive {
-		return fmt.Errorf("archive data = %q, want %q", finalLoad.Data, expectedArchive)
+	if !finalLoad.Found || finalLoad.Archive.GetTalentPoints() != int32(len(expectedArchive)) {
+		return fmt.Errorf("archive did not round trip")
 	}
 
 	return nil
@@ -110,7 +111,7 @@ func (p *probe) close() {
 	_ = p.conn.Close()
 }
 
-func (p *probe) send(msgID uint16, payload interface{}) error {
+func (p *probe) send(msgID uint16, payload proto.Message) error {
 	frame, err := protocol.Encode(msgID, payload)
 	if err != nil {
 		return fmt.Errorf("encode message %d: %w", msgID, err)
@@ -124,7 +125,7 @@ func (p *probe) send(msgID uint16, payload interface{}) error {
 	return nil
 }
 
-func (p *probe) read(expectedMsgID uint16, destination interface{}) error {
+func (p *probe) read(expectedMsgID uint16, destination proto.Message) error {
 	if err := p.conn.SetReadDeadline(time.Now().Add(probeTimeout)); err != nil {
 		return fmt.Errorf("set read deadline for message %d: %w", expectedMsgID, err)
 	}
@@ -141,8 +142,8 @@ func (p *probe) read(expectedMsgID uint16, destination interface{}) error {
 		return fmt.Errorf("decode response for message %d: %w", expectedMsgID, err)
 	}
 	if message.MsgID == protocol.MsgID_Error {
-		var errorResponse protocol.ErrorResp
-		if err := json.Unmarshal(message.Body, &errorResponse); err != nil {
+		var errorResponse protocolpb.ErrorResp
+		if err := proto.Unmarshal(message.Body, &errorResponse); err != nil {
 			return fmt.Errorf("decode server error response: %w", err)
 		}
 		return fmt.Errorf("server error %d: %s", errorResponse.Code, errorResponse.Msg)
@@ -150,7 +151,7 @@ func (p *probe) read(expectedMsgID uint16, destination interface{}) error {
 	if message.MsgID != expectedMsgID {
 		return fmt.Errorf("response message id = %d, want %d", message.MsgID, expectedMsgID)
 	}
-	if err := json.Unmarshal(message.Body, destination); err != nil {
+	if err := proto.Unmarshal(message.Body, destination); err != nil {
 		return fmt.Errorf("decode message %d body: %w", expectedMsgID, err)
 	}
 	return nil

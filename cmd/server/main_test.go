@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -10,12 +9,64 @@ import (
 	"testing"
 	"time"
 
+	"game-server/internal/combat"
 	"game-server/internal/config"
+	"game-server/internal/game"
+	"game-server/internal/gm"
+	"game-server/internal/login"
 	"game-server/internal/payment"
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
+	"game-server/internal/rank"
 	"game-server/internal/session"
 	"game-server/internal/store"
+
+	"google.golang.org/protobuf/proto"
 )
+
+// These assignments make every production WebSocket route fail compilation if
+// a handler drifts from its generated protobuf request or response type.
+var (
+	_ interface {
+		Login(context.Context, *protocolpb.LoginReq) (*protocolpb.LoginResp, error)
+		Heartbeat(context.Context, *protocolpb.HeartbeatReq) (*protocolpb.HeartbeatResp, error)
+	} = (*login.Handler)(nil)
+	_ interface {
+		SaveArchive(context.Context, *protocolpb.SaveArchiveReq) (*protocolpb.SaveArchiveResp, error)
+		LoadArchive(context.Context, *protocolpb.LoadArchiveReq) (*protocolpb.LoadArchiveResp, error)
+	} = (*game.Handler)(nil)
+	_ interface {
+		GetRank(context.Context, *protocolpb.GetRankReq) (*protocolpb.GetRankResp, error)
+		SubmitScore(context.Context, *protocolpb.SubmitScoreReq) (*protocolpb.SubmitScoreResp, error)
+	} = (*rank.Handler)(nil)
+	_ interface {
+		CreateOrder(context.Context, *protocolpb.CreateOrderReq) (*protocolpb.CreateOrderResp, error)
+	} = (*payment.Handler)(nil)
+	_ interface {
+		CombatResult(context.Context, *protocolpb.CombatResultReq) (*protocolpb.CombatResultResp, error)
+		GetEnemyConfigs(context.Context, *protocolpb.GetEnemyConfigsReq) (*protocolpb.GetEnemyConfigsResp, error)
+		GetDungeonConfig(context.Context, *protocolpb.GetDungeonConfigReq) (*protocolpb.GetDungeonConfigResp, error)
+		GetStyleConfigs(context.Context, *protocolpb.GetStyleConfigsReq) (*protocolpb.GetStyleConfigsResp, error)
+		UnlockStyle(context.Context, *protocolpb.UnlockStyleReq) (*protocolpb.UnlockStyleResp, error)
+		GetPlayerStats(context.Context, *protocolpb.GetPlayerStatsReq) (*protocolpb.GetPlayerStatsResp, error)
+		UpdatePlayerStats(context.Context, *protocolpb.UpdatePlayerStatsReq) (*protocolpb.UpdatePlayerStatsResp, error)
+	} = (*combat.Handler)(nil)
+	_ interface {
+		Command(context.Context, *protocolpb.GMCommandReq) (*protocolpb.GMCommandResp, error)
+	} = (*gm.Handler)(nil)
+)
+
+func TestProductionWebSocketRouteIDsCoverEveryRequest(t *testing.T) {
+	routes := protocol.Routes()
+	if len(routes) != 15 {
+		t.Fatalf("route coverage = %d, want 15", len(routes))
+	}
+	for _, route := range routes {
+		if route.RequestID == 0 || route.ResponseID == 0 || route.RequestPrototype == nil || route.ResponsePrototype == nil {
+			t.Fatalf("invalid route %#v", route)
+		}
+	}
+}
 
 func TestPaymentCallbackRejectsOversizedBodyWithoutCallingHandler(t *testing.T) {
 	callbackCalls := 0
@@ -64,7 +115,7 @@ type runtimeCaptureConn struct {
 	frames [][]byte
 }
 
-func (c *runtimeCaptureConn) SendMessage(msgID uint16, payload interface{}) error {
+func (c *runtimeCaptureConn) SendMessage(msgID uint16, payload proto.Message) error {
 	frame, err := protocol.Encode(msgID, payload)
 	if err != nil {
 		return err
@@ -144,7 +195,7 @@ func TestNewRuntimeDevelopmentInstallsAuthenticationHook(t *testing.T) {
 
 	conn := &runtimeCaptureConn{}
 	ctx := session.WithSession(context.Background(), session.New(conn))
-	frame, err := protocol.Encode(protocol.MsgID_SaveArchiveReq, protocol.SaveArchiveReq{Data: "{}"})
+	frame, err := protocol.Encode(protocol.MsgID_SaveArchiveReq, &protocolpb.SaveArchiveReq{})
 	if err != nil {
 		t.Fatalf("encode request: %v", err)
 	}
@@ -160,11 +211,11 @@ func TestNewRuntimeDevelopmentInstallsAuthenticationHook(t *testing.T) {
 	if message.MsgID != protocol.MsgID_Error {
 		t.Fatalf("response message = %d, want error", message.MsgID)
 	}
-	var response protocol.ErrorResp
-	if err := json.Unmarshal(message.Body, &response); err != nil {
+	var response protocolpb.ErrorResp
+	if err := proto.Unmarshal(message.Body, &response); err != nil {
 		t.Fatalf("decode error body: %v", err)
 	}
-	if response.Code != protocol.ErrUnauthorized {
+	if response.Code != int32(protocol.ErrUnauthorized) {
 		t.Fatalf("error code = %d, want %d", response.Code, protocol.ErrUnauthorized)
 	}
 }

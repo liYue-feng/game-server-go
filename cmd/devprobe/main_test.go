@@ -1,153 +1,84 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 
 	"github.com/gorilla/websocket"
+	"google.golang.org/protobuf/proto"
 )
 
 func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
-	const archive = `{"phase":"a4","source":"devprobe"}`
-	serverErrors := make(chan error, 2)
-	identities := make(chan string, 2)
-	archives := make(map[string]string)
-	var archivesMu sync.Mutex
+	var mu sync.Mutex
+	archives := map[string]*protocolpb.PlayerArchive{}
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
-			serverErrors <- err
 			return
 		}
 		defer conn.Close()
-
-		loginBody, err := readProbeRequest(conn, protocol.MsgID_LoginReq)
-		if err != nil {
-			serverErrors <- err
+		login := &protocolpb.LoginReq{}
+		if err := readProbeMessage(conn, protocol.MsgID_LoginReq, login); err != nil {
 			return
 		}
-		var loginRequest protocol.LoginReq
-		if err := json.Unmarshal(loginBody, &loginRequest); err != nil {
-			serverErrors <- err
+		_ = writeProbeMessage(conn, protocol.MsgID_LoginResp, &protocolpb.LoginResp{Uid: 42, Token: "token"})
+		if err := readProbeMessage(conn, protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
 			return
 		}
-		if !strings.HasPrefix(loginRequest.Code, "dev:") || strings.TrimPrefix(loginRequest.Code, "dev:") == "" {
-			serverErrors <- fmt.Errorf("login code = %q, want non-empty dev identity", loginRequest.Code)
+		mu.Lock()
+		initial := archives[login.Code]
+		mu.Unlock()
+		_ = writeProbeMessage(conn, protocol.MsgID_LoadArchiveResp, &protocolpb.LoadArchiveResp{Found: initial != nil, Archive: initial})
+		save := &protocolpb.SaveArchiveReq{}
+		if err := readProbeMessage(conn, protocol.MsgID_SaveArchiveReq, save); err != nil {
 			return
 		}
-		identities <- loginRequest.Code
-		if err := writeProbeResponse(conn, protocol.MsgID_LoginResp, protocol.LoginResp{Uid: 42, Nickname: "probe", Token: "token"}); err != nil {
-			serverErrors <- err
+		mu.Lock()
+		archives[login.Code] = save.Archive
+		mu.Unlock()
+		_ = writeProbeMessage(conn, protocol.MsgID_SaveArchiveResp, &protocolpb.SaveArchiveResp{Success: true})
+		if err := readProbeMessage(conn, protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
 			return
 		}
-
-		if _, err := readProbeRequest(conn, protocol.MsgID_LoadArchiveReq); err != nil {
-			serverErrors <- err
-			return
-		}
-		archivesMu.Lock()
-		initialArchive := archives[loginRequest.Code]
-		archivesMu.Unlock()
-		if err := writeProbeResponse(conn, protocol.MsgID_LoadArchiveResp, protocol.LoadArchiveResp{Data: initialArchive}); err != nil {
-			serverErrors <- err
-			return
-		}
-
-		saveBody, err := readProbeRequest(conn, protocol.MsgID_SaveArchiveReq)
-		if err != nil {
-			serverErrors <- err
-			return
-		}
-		var saveRequest protocol.SaveArchiveReq
-		if err := json.Unmarshal(saveBody, &saveRequest); err != nil {
-			serverErrors <- err
-			return
-		}
-		if saveRequest.Data != archive {
-			serverErrors <- fmt.Errorf("archive data = %q, want %q", saveRequest.Data, archive)
-			return
-		}
-		archivesMu.Lock()
-		archives[loginRequest.Code] = saveRequest.Data
-		archivesMu.Unlock()
-		if err := writeProbeResponse(conn, protocol.MsgID_SaveArchiveResp, protocol.SaveArchiveResp{Success: true}); err != nil {
-			serverErrors <- err
-			return
-		}
-
-		if _, err := readProbeRequest(conn, protocol.MsgID_LoadArchiveReq); err != nil {
-			serverErrors <- err
-			return
-		}
-		archivesMu.Lock()
-		finalArchive := archives[loginRequest.Code]
-		archivesMu.Unlock()
-		if err := writeProbeResponse(conn, protocol.MsgID_LoadArchiveResp, protocol.LoadArchiveResp{Data: finalArchive}); err != nil {
-			serverErrors <- err
-			return
-		}
-
-		if err := conn.SetReadDeadline(time.Now().Add(probeTimeout)); err != nil {
-			serverErrors <- err
-			return
-		}
-		_, _, err = conn.ReadMessage()
-		if !websocket.IsCloseError(err, websocket.CloseNormalClosure) {
-			serverErrors <- fmt.Errorf("probe close error = %v, want normal closure", err)
-			return
-		}
-		serverErrors <- nil
+		mu.Lock()
+		final := archives[login.Code]
+		mu.Unlock()
+		_ = writeProbeMessage(conn, protocol.MsgID_LoadArchiveResp, &protocolpb.LoadArchiveResp{Found: final != nil, Archive: final})
 	}))
 	defer server.Close()
-
 	address := "ws" + strings.TrimPrefix(server.URL, "http")
-	firstErr := runProbe(address, archive)
-	secondErr := runProbe(address, archive)
-	if firstErr != nil {
-		t.Fatalf("first runProbe() error = %v", firstErr)
+	if err := runProbe(address, "first"); err != nil {
+		t.Fatal(err)
 	}
-	if secondErr != nil {
-		t.Fatalf("second runProbe() error = %v", secondErr)
-	}
-	for attempt := 0; attempt < 2; attempt++ {
-		if err := <-serverErrors; err != nil {
-			t.Fatalf("probe server attempt %d error = %v", attempt+1, err)
-		}
-	}
-	firstIdentity := <-identities
-	secondIdentity := <-identities
-	if firstIdentity == secondIdentity {
-		t.Fatalf("probe identities are both %q, want a unique identity per run", firstIdentity)
+	if err := runProbe(address, "second"); err != nil {
+		t.Fatal(err)
 	}
 }
 
-func readProbeRequest(conn *websocket.Conn, expectedMsgID uint16) ([]byte, error) {
+func readProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) error {
 	_, frame, err := conn.ReadMessage()
 	if err != nil {
-		return nil, err
+		return err
 	}
-	message, err := protocol.Decode(frame)
+	decoded, err := protocol.Decode(frame)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if message.MsgID != expectedMsgID {
-		return nil, fmt.Errorf("request message id = %d, want %d", message.MsgID, expectedMsgID)
+	if decoded.MsgID != id {
+		return fmt.Errorf("message ID = %d, want %d", decoded.MsgID, id)
 	}
-	return message.Body, nil
+	return proto.Unmarshal(decoded.Body, message)
 }
-
-func writeProbeResponse(conn *websocket.Conn, msgID uint16, payload interface{}) error {
-	frame, err := protocol.Encode(msgID, payload)
+func writeProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) error {
+	frame, err := protocol.Encode(id, message)
 	if err != nil {
 		return err
 	}

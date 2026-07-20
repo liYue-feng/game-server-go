@@ -121,20 +121,20 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 	combatHandler := combat.NewHandler(mysqlStore, redisStore)
 
 	registerOnlineSessionHandlers(k, loginHandler, gameHandler)
-	k.Register(protocol.MsgID_GetRankReq, protocol.MsgID_GetRankResp, rankHandler.GetRank)
-	k.Register(protocol.MsgID_SubmitScoreReq, protocol.MsgID_SubmitScoreResp, rankHandler.SubmitScore)
-	k.Register(protocol.MsgID_CreateOrderReq, protocol.MsgID_CreateOrderResp, paymentHandler.CreateOrder)
-	k.Register(protocol.MsgID_CombatResultReq, protocol.MsgID_CombatResultResp, combatHandler.CombatResult)
-	k.Register(protocol.MsgID_GetEnemyConfigsReq, protocol.MsgID_GetEnemyConfigsResp, combatHandler.GetEnemyConfigs)
-	k.Register(protocol.MsgID_GetDungeonConfigReq, protocol.MsgID_GetDungeonConfigResp, combatHandler.GetDungeonConfig)
-	k.Register(protocol.MsgID_GetStyleConfigsReq, protocol.MsgID_GetStyleConfigsResp, combatHandler.GetStyleConfigs)
-	k.Register(protocol.MsgID_UnlockStyleReq, protocol.MsgID_UnlockStyleResp, combatHandler.UnlockStyle)
-	k.Register(protocol.MsgID_GetPlayerStatsReq, protocol.MsgID_GetPlayerStatsResp, combatHandler.GetPlayerStats)
-	k.Register(protocol.MsgID_UpdatePlayerStatsReq, protocol.MsgID_UpdatePlayerStatsResp, combatHandler.UpdatePlayerStats)
+	k.RegisterRoute(protocol.MsgID_GetRankReq, rankHandler.GetRank)
+	k.RegisterRoute(protocol.MsgID_SubmitScoreReq, rankHandler.SubmitScore)
+	k.RegisterRoute(protocol.MsgID_CreateOrderReq, paymentHandler.CreateOrder)
+	k.RegisterRoute(protocol.MsgID_CombatResultReq, combatHandler.CombatResult)
+	k.RegisterRoute(protocol.MsgID_GetEnemyConfigsReq, combatHandler.GetEnemyConfigs)
+	k.RegisterRoute(protocol.MsgID_GetDungeonConfigReq, combatHandler.GetDungeonConfig)
+	k.RegisterRoute(protocol.MsgID_GetStyleConfigsReq, combatHandler.GetStyleConfigs)
+	k.RegisterRoute(protocol.MsgID_UnlockStyleReq, combatHandler.UnlockStyle)
+	k.RegisterRoute(protocol.MsgID_GetPlayerStatsReq, combatHandler.GetPlayerStats)
+	k.RegisterRoute(protocol.MsgID_UpdatePlayerStatsReq, combatHandler.UpdatePlayerStats)
 
 	server := transport.NewServer(k)
 	gmHandler := gm.NewHandler(mysqlStore, redisStore, server.Hub(), cfg.GM.AdminUIDs)
-	k.Register(protocol.MsgID_GMCommandReq, protocol.MsgID_GMCommandResp, gmHandler.Command)
+	k.RegisterRoute(protocol.MsgID_GMCommandReq, gmHandler.Command)
 
 	hookChain.AddBefore(hooks.Auth(redisStore, k))
 	hookChain.AddBefore(hooks.RateLimit(redisStore, k, 100, time.Second))
@@ -148,10 +148,10 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 }
 
 func registerOnlineSessionHandlers(k *kernel.Kernel, loginHandler *login.Handler, gameHandler *game.Handler) {
-	k.Register(protocol.MsgID_LoginReq, protocol.MsgID_LoginResp, loginHandler.Login, kernel.AuthFree())
-	k.Register(protocol.MsgID_HeartbeatReq, protocol.MsgID_HeartbeatResp, loginHandler.Heartbeat, kernel.AuthFree())
-	k.Register(protocol.MsgID_SaveArchiveReq, protocol.MsgID_SaveArchiveResp, gameHandler.SaveArchive)
-	k.Register(protocol.MsgID_LoadArchiveReq, protocol.MsgID_LoadArchiveResp, gameHandler.LoadArchive)
+	k.RegisterRoute(protocol.MsgID_LoginReq, loginHandler.Login, kernel.AuthFree())
+	k.RegisterRoute(protocol.MsgID_HeartbeatReq, loginHandler.Heartbeat, kernel.AuthFree())
+	k.RegisterRoute(protocol.MsgID_SaveArchiveReq, gameHandler.SaveArchive)
+	k.RegisterRoute(protocol.MsgID_LoadArchiveReq, gameHandler.LoadArchive)
 }
 
 func newRuntimeClose(closers ...func() error) func() error {

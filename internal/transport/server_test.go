@@ -114,7 +114,7 @@ func TestServerShutdownWaitsForActiveHandlerAndClosesConnection(t *testing.T) {
 	ws := dialWebSocket(t, addr)
 	defer ws.Close()
 
-	request, err := protocol.Encode(protocol.MsgID_HeartbeatReq, protocol.HeartbeatReq{Timestamp: 1})
+	request, err := protocol.Encode(protocol.MsgID_HeartbeatReq, &protocol.HeartbeatReq{Timestamp: 1})
 	if err != nil {
 		t.Fatalf("encode request: %v", err)
 	}

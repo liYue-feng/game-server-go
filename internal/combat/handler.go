@@ -14,6 +14,7 @@ import (
 	"strconv"
 
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 	"game-server/internal/session"
 	"game-server/internal/store"
 
@@ -34,15 +35,15 @@ func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore) *Handler {
 }
 
 // CombatResult 处理战斗结算请求：反作弊校验 -> 计算奖励 -> 持久化 -> 同步排行榜。
-func (h *Handler) CombatResult(ctx context.Context, req *protocol.CombatResultReq) (*protocol.CombatResultResp, error) {
+func (h *Handler) CombatResult(ctx context.Context, req *protocolpb.CombatResultReq) (*protocolpb.CombatResultResp, error) {
 	// 基础反作弊校验
 	if err := validateCombatResult(req, h.cfg); err != nil {
 		return nil, protocol.NewBizError(protocol.ErrCombatCheatDetected, err.Error())
 	}
 
 	uid := uidFromCtx(ctx)
-	rewardGold := req.Kills * h.cfg.GoldPerKill
-	rewardExp := req.Kills * h.cfg.ExpPerKill
+	rewardGold := int(req.Kills) * h.cfg.GoldPerKill
+	rewardExp := int(req.Kills) * h.cfg.ExpPerKill
 
 	// 读取或初始化玩家战斗属性
 	stats, err := h.mysql.GetPlayerStats(uid)
@@ -69,7 +70,7 @@ func (h *Handler) CombatResult(ctx context.Context, req *protocol.CombatResultRe
 		}
 	}
 	if req.Kills > 0 {
-		if err := h.mysql.IncrementPlayerTotalKills(uid, req.Kills); err != nil {
+		if err := h.mysql.IncrementPlayerTotalKills(uid, int(req.Kills)); err != nil {
 			zap.L().Error("累加击杀数失败", zap.Int64("uid", uid), zap.Error(err))
 		}
 	}
@@ -79,7 +80,7 @@ func (h *Handler) CombatResult(ctx context.Context, req *protocol.CombatResultRe
 
 	// 更新最高分（仅高于历史才更新）
 	var bestScore int64
-	if err := h.mysql.UpdatePlayerBestScore(uid, int64(req.Score)); err != nil {
+	if err := h.mysql.UpdatePlayerBestScore(uid, req.Score); err != nil {
 		zap.L().Error("更新最高分失败", zap.Int64("uid", uid), zap.Error(err))
 	}
 	if updated, err := h.mysql.GetPlayerStats(uid); err == nil {
@@ -89,9 +90,9 @@ func (h *Handler) CombatResult(ctx context.Context, req *protocol.CombatResultRe
 	// 保存分数记录（历史查询用途）
 	scoreRecord := &store.ScoreRecord{
 		PlayerID: uid,
-		Score:    int64(req.Score),
-		Metadata: fmt.Sprintf(`{"kills":%d,"survival_time":%.1f,"dungeon_level":%d,"style_id":%d}`,
-			req.Kills, req.SurvivalTime, req.DungeonLevel, req.StyleID),
+		Score:    req.Score,
+		Metadata: fmt.Sprintf(`{"kills":%d,"duration_ms":%d,"dungeon_level":%d,"style_id":%d}`,
+			req.Kills, req.DurationMs, req.DungeonLevel, req.StyleId),
 	}
 	if err := h.mysql.CreateScoreRecord(scoreRecord); err != nil {
 		zap.L().Error("保存分数记录失败", zap.Int64("uid", uid), zap.Error(err))
@@ -100,54 +101,54 @@ func (h *Handler) CombatResult(ctx context.Context, req *protocol.CombatResultRe
 	// 同步提交到 Redis 排行榜
 	if h.redis != nil {
 		nickname := strconv.FormatInt(uid, 10)
-		if err := h.redis.UpdateRank(1, uid, nickname, int64(req.Score)); err != nil {
+		if err := h.redis.UpdateRank(1, uid, nickname, req.Score); err != nil {
 			zap.L().Error("提交排行榜失败", zap.Int64("uid", uid), zap.Error(err))
 		}
 	}
 
 	zap.L().Info("战斗结算成功",
-		zap.Int64("uid", uid), zap.Int("score", req.Score), zap.Int("kills", req.Kills),
+		zap.Int64("uid", uid), zap.Int64("score", req.Score), zap.Int32("kills", req.Kills),
 		zap.Int("reward_gold", rewardGold), zap.Int("reward_exp", rewardExp))
 
-	return &protocol.CombatResultResp{
+	return &protocolpb.CombatResultResp{
 		Success:    true,
-		RewardGold: rewardGold,
-		RewardExp:  rewardExp,
+		RewardGold: int32(rewardGold),
+		RewardExp:  int32(rewardExp),
 		BestScore:  bestScore,
 	}, nil
 }
 
 // GetEnemyConfigs 返回敌人配置表。
-func (h *Handler) GetEnemyConfigs(ctx context.Context, req *protocol.GetEnemyConfigsReq) (*protocol.GetEnemyConfigsResp, error) {
-	return &protocol.GetEnemyConfigsResp{Configs: GetEnemyConfigs()}, nil
+func (h *Handler) GetEnemyConfigs(ctx context.Context, req *protocolpb.GetEnemyConfigsReq) (*protocolpb.GetEnemyConfigsResp, error) {
+	return &protocolpb.GetEnemyConfigsResp{Configs: GetEnemyConfigs()}, nil
 }
 
 // GetDungeonConfig 返回指定等级的地牢配置。
-func (h *Handler) GetDungeonConfig(ctx context.Context, req *protocol.GetDungeonConfigReq) (*protocol.GetDungeonConfigResp, error) {
+func (h *Handler) GetDungeonConfig(ctx context.Context, req *protocolpb.GetDungeonConfigReq) (*protocolpb.GetDungeonConfigResp, error) {
 	if req.Level <= 0 {
 		return nil, protocol.NewBizError(protocol.ErrCombatConfigNotFound, "无效的地牢等级")
 	}
-	cfg := GetDungeonConfig(req.Level)
+	cfg := GetDungeonConfig(int(req.Level))
 	if cfg == nil {
 		return nil, protocol.NewBizError(protocol.ErrCombatConfigNotFound, "地牢配置不存在")
 	}
-	return &protocol.GetDungeonConfigResp{
+	return &protocolpb.GetDungeonConfigResp{
 		Level:        cfg.Level,
 		RoomCount:    cfg.RoomCount,
 		EnemyDensity: cfg.EnemyDensity,
-		BossID:       cfg.BossID,
+		BossId:       cfg.BossId,
 		EnemyConfigs: GetEnemyConfigs(),
 	}, nil
 }
 
 // GetStyleConfigs 返回流派配置表。
-func (h *Handler) GetStyleConfigs(ctx context.Context, req *protocol.GetStyleConfigsReq) (*protocol.GetStyleConfigsResp, error) {
-	return &protocol.GetStyleConfigsResp{Styles: GetStyleConfigs()}, nil
+func (h *Handler) GetStyleConfigs(ctx context.Context, req *protocolpb.GetStyleConfigsReq) (*protocolpb.GetStyleConfigsResp, error) {
+	return &protocolpb.GetStyleConfigsResp{Styles: GetStyleConfigs()}, nil
 }
 
 // UnlockStyle 处理流派解锁请求：校验存在性 -> 幂等检查 -> 扣金币 -> 记录解锁。
-func (h *Handler) UnlockStyle(ctx context.Context, req *protocol.UnlockStyleReq) (*protocol.UnlockStyleResp, error) {
-	if getStyleConfig(req.StyleID) == nil {
+func (h *Handler) UnlockStyle(ctx context.Context, req *protocolpb.UnlockStyleReq) (*protocolpb.UnlockStyleResp, error) {
+	if getStyleConfig(int(req.StyleId)) == nil {
 		return nil, protocol.NewBizError(protocol.ErrCombatStyleLocked, "流派不存在")
 	}
 
@@ -159,14 +160,14 @@ func (h *Handler) UnlockStyle(ctx context.Context, req *protocol.UnlockStyleReq)
 		zap.L().Error("查询已解锁流派失败", zap.Int64("uid", uid), zap.Error(err))
 	}
 	for _, s := range styles {
-		if s.StyleID == req.StyleID {
-			return &protocol.UnlockStyleResp{Success: true, GoldCost: 0}, nil
+		if s.StyleID == int(req.StyleId) {
+			return &protocolpb.UnlockStyleResp{Success: true, GoldCost: 0}, nil
 		}
 	}
 
 	// 解锁费用：默认 100 金币，流派 1（刀）免费
 	goldCost := 100
-	if req.StyleID == 1 {
+	if req.StyleId == 1 {
 		goldCost = 0
 	}
 
@@ -180,17 +181,17 @@ func (h *Handler) UnlockStyle(ctx context.Context, req *protocol.UnlockStyleReq)
 		}
 	}
 
-	if err := h.mysql.UnlockPlayerStyle(uid, req.StyleID); err != nil {
+	if err := h.mysql.UnlockPlayerStyle(uid, int(req.StyleId)); err != nil {
 		zap.L().Error("记录流派解锁失败", zap.Int64("uid", uid), zap.Error(err))
 		return nil, protocol.NewBizError(protocol.ErrInternal, "解锁失败")
 	}
 
-	zap.L().Info("流派解锁成功", zap.Int64("uid", uid), zap.Int("style_id", req.StyleID), zap.Int("cost", goldCost))
-	return &protocol.UnlockStyleResp{Success: true, GoldCost: goldCost}, nil
+	zap.L().Info("流派解锁成功", zap.Int64("uid", uid), zap.Int32("style_id", req.StyleId), zap.Int("cost", goldCost))
+	return &protocolpb.UnlockStyleResp{Success: true, GoldCost: int32(goldCost)}, nil
 }
 
 // GetPlayerStats 获取玩家战斗属性；新玩家返回默认值并自动创建记录。
-func (h *Handler) GetPlayerStats(ctx context.Context, req *protocol.GetPlayerStatsReq) (*protocol.GetPlayerStatsResp, error) {
+func (h *Handler) GetPlayerStats(ctx context.Context, req *protocolpb.GetPlayerStatsReq) (*protocolpb.GetPlayerStatsResp, error) {
 	uid := uidFromCtx(ctx)
 
 	stats, err := h.mysql.GetPlayerStats(uid)
@@ -206,28 +207,28 @@ func (h *Handler) GetPlayerStats(ctx context.Context, req *protocol.GetPlayerSta
 
 	// 已解锁流派；新玩家默认解锁流派 1
 	playerStyles, _ := h.mysql.GetPlayerStyles(uid)
-	unlockedStyleIDs := make([]int, 0, len(playerStyles))
+	unlockedStyleIDs := make([]int32, 0, len(playerStyles))
 	for _, s := range playerStyles {
-		unlockedStyleIDs = append(unlockedStyleIDs, s.StyleID)
+		unlockedStyleIDs = append(unlockedStyleIDs, int32(s.StyleID))
 	}
 	if len(unlockedStyleIDs) == 0 {
-		unlockedStyleIDs = []int{1}
+		unlockedStyleIDs = []int32{1}
 		h.mysql.UnlockPlayerStyle(uid, 1)
 	}
 
-	return &protocol.GetPlayerStatsResp{
-		Level:          stats.Level,
-		Exp:            stats.Exp,
-		Gold:           stats.Gold,
-		MaxHp:          stats.MaxHp,
-		MaxStamina:     stats.MaxStamina,
-		AttackPower:    stats.AttackPower,
+	return &protocolpb.GetPlayerStatsResp{
+		Level:          int32(stats.Level),
+		Exp:            int32(stats.Exp),
+		Gold:           int32(stats.Gold),
+		MaxHp:          int32(stats.MaxHp),
+		MaxStamina:     int32(stats.MaxStamina),
+		AttackPower:    int32(stats.AttackPower),
 		UnlockedStyles: unlockedStyleIDs,
 	}, nil
 }
 
 // UpdatePlayerStats 全量覆盖更新玩家战斗属性（客户端上报完整快照）。
-func (h *Handler) UpdatePlayerStats(ctx context.Context, req *protocol.UpdatePlayerStatsReq) (*protocol.UpdatePlayerStatsResp, error) {
+func (h *Handler) UpdatePlayerStats(ctx context.Context, req *protocolpb.UpdatePlayerStatsReq) (*protocolpb.UpdatePlayerStatsResp, error) {
 	uid := uidFromCtx(ctx)
 
 	// 基础反作弊：数值边界检查
@@ -246,12 +247,12 @@ func (h *Handler) UpdatePlayerStats(ctx context.Context, req *protocol.UpdatePla
 		return nil, protocol.NewBizError(protocol.ErrInternal, "服务器内部错误")
 	}
 
-	stats.Level = req.Level
-	stats.Exp = req.Exp
-	stats.Gold = req.Gold
-	stats.MaxHp = req.MaxHp
-	stats.MaxStamina = req.MaxStamina
-	stats.AttackPower = req.AttackPower
+	stats.Level = int(req.Level)
+	stats.Exp = int(req.Exp)
+	stats.Gold = int(req.Gold)
+	stats.MaxHp = int(req.MaxHp)
+	stats.MaxStamina = int(req.MaxStamina)
+	stats.AttackPower = int(req.AttackPower)
 
 	if err := h.mysql.UpdatePlayerStats(stats); err != nil {
 		zap.L().Error("更新玩家属性失败", zap.Int64("uid", uid), zap.Error(err))
@@ -260,10 +261,10 @@ func (h *Handler) UpdatePlayerStats(ctx context.Context, req *protocol.UpdatePla
 
 	// 同步更新解锁的流派
 	for _, styleID := range req.UnlockedStyles {
-		h.mysql.UnlockPlayerStyle(uid, styleID)
+		h.mysql.UnlockPlayerStyle(uid, int(styleID))
 	}
 
-	return &protocol.UpdatePlayerStatsResp{Success: true}, nil
+	return &protocolpb.UpdatePlayerStatsResp{Success: true}, nil
 }
 
 // defaultStats 构造新玩家的默认战斗属性。
@@ -280,10 +281,10 @@ func (h *Handler) defaultStats(uid int64) *store.PlayerStats {
 }
 
 // getStyleConfig 根据流派 ID 查找配置，找不到返回 nil。
-func getStyleConfig(styleID int) *protocol.StyleConfigItem {
+func getStyleConfig(styleID int) *protocolpb.StyleConfigItem {
 	for _, s := range GetStyleConfigs() {
-		if s.StyleID == styleID {
-			return &s
+		if int(s.StyleId) == styleID {
+			return s
 		}
 	}
 	return nil

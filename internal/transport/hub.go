@@ -11,6 +11,7 @@ import (
 	"game-server/internal/protocol"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 // Hub 管理所有活跃的客户端连接。
@@ -146,7 +147,7 @@ func (h *Hub) OnlineCount() int {
 }
 
 // Broadcast 向所有在线连接广播消息（服务器公告、活动通知等）。
-func (h *Hub) Broadcast(msgID uint16, payload interface{}) {
+func (h *Hub) Broadcast(msgID uint16, payload proto.Message) {
 	data, err := protocol.Encode(msgID, payload)
 	if err != nil {
 		zap.L().Error("广播消息编码失败", zap.Error(err))

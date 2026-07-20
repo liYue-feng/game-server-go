@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 	"game-server/internal/session"
 	"game-server/internal/store"
 
@@ -34,7 +35,7 @@ func NewHandlerWithService(service *LoginService) *Handler {
 	return &Handler{service: service}
 }
 
-func (h *Handler) Login(ctx context.Context, req *protocol.LoginReq) (*protocol.LoginResp, error) {
+func (h *Handler) Login(ctx context.Context, req *protocolpb.LoginReq) (*protocolpb.LoginResp, error) {
 	if strings.HasPrefix(req.Code, "dev:") {
 		zap.L().Info("development login request", zap.String("code", req.Code))
 	}
@@ -56,7 +57,7 @@ func (h *Handler) Login(ctx context.Context, req *protocol.LoginReq) (*protocol.
 	}
 
 	zap.L().Info("玩家登录成功", zap.Int64("uid", result.UID), zap.String("nickname", result.Nickname))
-	return &protocol.LoginResp{
+	return &protocolpb.LoginResp{
 		Uid:      result.UID,
 		Nickname: result.Nickname,
 		Token:    result.Token,
@@ -73,13 +74,13 @@ func classifyLoginError(err error) (int, string) {
 	return protocol.ErrInternal, "登录失败"
 }
 
-func (h *Handler) Heartbeat(ctx context.Context, req *protocol.HeartbeatReq) (*protocol.HeartbeatResp, error) {
+func (h *Handler) Heartbeat(ctx context.Context, req *protocolpb.HeartbeatReq) (*protocolpb.HeartbeatResp, error) {
 	if current := session.FromContext(ctx); current != nil && current.UID() > 0 {
 		if err := h.service.RefreshSession(current.UID()); err != nil {
 			return nil, fmt.Errorf("refresh session for uid %d: %w", current.UID(), err)
 		}
 	}
-	return &protocol.HeartbeatResp{Timestamp: req.Timestamp}, nil
+	return &protocolpb.HeartbeatResp{Timestamp: req.Timestamp}, nil
 }
 
 func GenerateToken() (string, error) {

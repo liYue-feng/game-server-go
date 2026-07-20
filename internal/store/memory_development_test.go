@@ -146,26 +146,44 @@ func TestMemoryDevelopmentStoreSavesAndLoadsArchive(t *testing.T) {
 		t.Fatalf("GetArchive(missing) error = %v, want not found", err)
 	}
 
-	archive := &Archive{PlayerID: 1, Data: `{"coins":3}`}
+	archive := &Archive{PlayerID: 1, Data: []byte(`{"coins":3}`)}
 	if err := developmentStore.SaveArchive(archive); err != nil {
 		t.Fatalf("SaveArchive() error = %v", err)
 	}
-	archive.Data = `{"coins":999}`
+	archive.Data = []byte(`{"coins":999}`)
 	stored, err := developmentStore.GetArchive(1)
 	if err != nil {
 		t.Fatalf("GetArchive() error = %v", err)
 	}
-	if stored.Data != `{"coins":3}` {
+	if string(stored.Data) != `{"coins":3}` {
 		t.Fatalf("GetArchive() data = %q, want exact saved data", stored.Data)
 	}
 
-	stored.Data = `{"coins":0}`
+	stored.Data = []byte(`{"coins":0}`)
 	storedAgain, err := developmentStore.GetArchive(1)
 	if err != nil {
 		t.Fatalf("GetArchive(second) error = %v", err)
 	}
-	if storedAgain.Data != `{"coins":3}` {
+	if string(storedAgain.Data) != `{"coins":3}` {
 		t.Fatalf("GetArchive() data after getter mutation = %q, want exact saved data", storedAgain.Data)
+	}
+}
+
+func TestMemoryDevelopmentStoreArchiveCopiesDataBackingArrays(t *testing.T) {
+	developmentStore := NewMemoryDevelopmentStore()
+	callerData := []byte{1, 2, 3}
+	if err := developmentStore.SaveArchive(&Archive{PlayerID: 1, Data: callerData}); err != nil {
+		t.Fatal(err)
+	}
+	callerData[0] = 9
+	loaded, err := developmentStore.GetArchive(1)
+	if err != nil || loaded.Data[0] != 1 {
+		t.Fatalf("saved data = %v, %v; want independent copy", loaded.Data, err)
+	}
+	loaded.Data[1] = 8
+	again, err := developmentStore.GetArchive(1)
+	if err != nil || again.Data[1] != 2 {
+		t.Fatalf("loaded data = %v, %v; want independent copy", again.Data, err)
 	}
 }
 

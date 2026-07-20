@@ -3,11 +3,15 @@ package kernel
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"testing"
 
 	"game-server/internal/pipeline"
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 	"game-server/internal/session"
+
+	"google.golang.org/protobuf/proto"
 )
 
 // captureConn 是 session.Conn 的测试替身：
@@ -17,7 +21,7 @@ type captureConn struct {
 	frames [][]byte
 }
 
-func (c *captureConn) SendMessage(msgID uint16, payload interface{}) error {
+func (c *captureConn) SendMessage(msgID uint16, payload proto.Message) error {
 	frame, err := protocol.Encode(msgID, payload)
 	if err != nil {
 		return err
@@ -47,7 +51,7 @@ func TestGoldenWireCompatibility(t *testing.T) {
 	ctx, _ := newCtx(conn)
 
 	// 构造客户端请求帧（与 Unity 发送格式一致）。
-	reqFrame, err := protocol.Encode(protocol.MsgID_LoginReq, protocol.LoginReq{Code: "abc"})
+	reqFrame, err := protocol.Encode(protocol.MsgID_LoginReq, &protocol.LoginReq{Code: "abc"})
 	if err != nil {
 		t.Fatalf("构造请求帧失败: %v", err)
 	}
@@ -58,7 +62,7 @@ func TestGoldenWireCompatibility(t *testing.T) {
 		t.Fatalf("应发送 1 帧响应, 实际 %d", len(conn.frames))
 	}
 	// 预期响应帧：用旧 Encode 生成的金标准字节。
-	want, _ := protocol.Encode(protocol.MsgID_LoginResp, protocol.LoginResp{Uid: 1001, Nickname: "abc", Token: "tok"})
+	want, _ := protocol.Encode(protocol.MsgID_LoginResp, &protocol.LoginResp{Uid: 1001, Nickname: "abc", Token: "tok"})
 	if !bytes.Equal(conn.frames[0], want) {
 		t.Fatalf("响应帧字节不匹配\n got=%v\nwant=%v", conn.frames[0], want)
 	}
@@ -74,10 +78,10 @@ func TestBizErrorEncoded(t *testing.T) {
 
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
-	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, protocol.LoginReq{Code: "x"})
+	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, &protocol.LoginReq{Code: "x"})
 	k.Dispatch(ctx, reqFrame)
 
-	want, _ := protocol.Encode(protocol.MsgID_Error, protocol.ErrorResp{Code: protocol.ErrLoginWechatFailed, Msg: "微信登录失败"})
+	want, _ := protocol.Encode(protocol.MsgID_Error, &protocol.ErrorResp{Code: int32(protocol.ErrLoginWechatFailed), Msg: "微信登录失败"})
 	if len(conn.frames) != 1 || !bytes.Equal(conn.frames[0], want) {
 		t.Fatalf("BizError 未正确编码为错误帧")
 	}
@@ -92,10 +96,10 @@ func TestSystemErrorMasked(t *testing.T) {
 		})
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
-	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, protocol.LoginReq{Code: "x"})
+	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, &protocol.LoginReq{Code: "x"})
 	k.Dispatch(ctx, reqFrame)
 
-	want, _ := protocol.Encode(protocol.MsgID_Error, protocol.ErrorResp{Code: protocol.ErrInternal, Msg: "服务器内部错误"})
+	want, _ := protocol.Encode(protocol.MsgID_Error, &protocol.ErrorResp{Code: int32(protocol.ErrInternal), Msg: "internal server error"})
 	if len(conn.frames) != 1 || !bytes.Equal(conn.frames[0], want) {
 		t.Fatalf("系统 error 未归一为 ErrInternal")
 	}
@@ -107,7 +111,7 @@ func TestUnknownMsgID(t *testing.T) {
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
 	// 用一个未注册的 MsgID 构帧。
-	reqFrame, _ := protocol.Encode(uint16(59999), struct{}{})
+	reqFrame, _ := protocol.Encode(uint16(59999), &protocol.HeartbeatReq{})
 	k.Dispatch(ctx, reqFrame)
 	if len(conn.frames) != 1 {
 		t.Fatalf("未注册消息应回一帧错误, 实际 %d", len(conn.frames))
@@ -129,13 +133,13 @@ func TestBeforeHookBreak(t *testing.T) {
 		})
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
-	reqFrame, _ := protocol.Encode(protocol.MsgID_SaveArchiveReq, protocol.SaveArchiveReq{Data: "{}"})
+	reqFrame, _ := protocol.Encode(protocol.MsgID_SaveArchiveReq, &protocol.SaveArchiveReq{})
 	k.Dispatch(ctx, reqFrame)
 
 	if handlerCalled {
 		t.Fatal("前置钩子中断后 handler 不应执行")
 	}
-	want, _ := protocol.Encode(protocol.MsgID_Error, protocol.ErrorResp{Code: protocol.ErrUnauthorized, Msg: "请先登录"})
+	want, _ := protocol.Encode(protocol.MsgID_Error, &protocol.ErrorResp{Code: int32(protocol.ErrUnauthorized), Msg: "请先登录"})
 	if len(conn.frames) != 1 || !bytes.Equal(conn.frames[0], want) {
 		t.Fatal("前置钩子错误未正确编码")
 	}
@@ -170,4 +174,78 @@ func TestHasHandlerReportsRegistration(t *testing.T) {
 	if k.HasHandler(protocol.MsgID_SaveArchiveReq) {
 		t.Fatal("unregistered message should not have a handler")
 	}
+}
+
+func TestKernelRejectsNonProtobufHandlerTypes(t *testing.T) {
+	assertPanics(t, func() {
+		New(nil).Register(protocol.MsgID_LoginReq, protocol.MsgID_LoginResp,
+			func(context.Context, *struct{}) (*protocolpb.LoginResp, error) { return nil, nil })
+	})
+	assertPanics(t, func() {
+		New(nil).Register(protocol.MsgID_LoginReq, protocol.MsgID_LoginResp,
+			func(context.Context, *protocolpb.LoginReq) (*struct{}, error) { return nil, nil })
+	})
+}
+
+func TestKernelRejectsNonCanonicalRouteBindings(t *testing.T) {
+	tests := []struct {
+		name string
+		id   uint16
+		resp uint16
+		fn   interface{}
+	}{
+		{"wrong request type", protocol.MsgID_LoginReq, protocol.MsgID_LoginResp, func(context.Context, *protocolpb.HeartbeatReq) (*protocolpb.LoginResp, error) { return nil, nil }},
+		{"wrong response type", protocol.MsgID_LoginReq, protocol.MsgID_LoginResp, func(context.Context, *protocolpb.LoginReq) (*protocolpb.HeartbeatResp, error) { return nil, nil }},
+		{"wrong response ID", protocol.MsgID_LoginReq, protocol.MsgID_HeartbeatResp, func(context.Context, *protocolpb.LoginReq) (*protocolpb.LoginResp, error) { return nil, nil }},
+		{"unknown request ID", 65535, protocol.MsgID_LoginResp, func(context.Context, *protocolpb.LoginReq) (*protocolpb.LoginResp, error) { return nil, nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assertPanics(t, func() { New(nil).Register(tt.id, tt.resp, tt.fn) })
+		})
+	}
+}
+
+func TestKernelRejectsMalformedProtobufAndSendsProtobufError(t *testing.T) {
+	k := New(nil)
+	k.Register(protocol.MsgID_LoginReq, protocol.MsgID_LoginResp,
+		func(context.Context, *protocolpb.LoginReq) (*protocolpb.LoginResp, error) {
+			return &protocolpb.LoginResp{}, nil
+		})
+	conn := &captureConn{}
+	ctx, _ := newCtx(conn)
+
+	frame := make([]byte, protocol.HeaderSize+1)
+	binary.LittleEndian.PutUint32(frame[:4], uint32(len(frame)))
+	binary.LittleEndian.PutUint16(frame[4:6], protocol.MsgID_LoginReq)
+	frame[6] = 0xff
+	k.Dispatch(ctx, frame)
+
+	if len(conn.frames) != 1 {
+		t.Fatalf("response frames = %d, want 1", len(conn.frames))
+	}
+	message, err := protocol.Decode(conn.frames[0])
+	if err != nil {
+		t.Fatalf("decode response frame: %v", err)
+	}
+	if message.MsgID != protocol.MsgID_Error {
+		t.Fatalf("response message ID = %d, want error", message.MsgID)
+	}
+	var response protocolpb.ErrorResp
+	if err := proto.Unmarshal(message.Body, &response); err != nil {
+		t.Fatalf("unmarshal protobuf error response: %v", err)
+	}
+	if response.Code != int32(protocol.ErrInvalidParam) {
+		t.Fatalf("error code = %d, want %d", response.Code, protocol.ErrInvalidParam)
+	}
+}
+
+func assertPanics(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("operation did not panic")
+		}
+	}()
+	fn()
 }

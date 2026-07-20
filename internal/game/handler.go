@@ -4,50 +4,34 @@ import (
 	"context"
 
 	"game-server/internal/protocol"
+	"game-server/internal/protocolpb"
 	"game-server/internal/session"
 	"game-server/internal/store"
-
-	"go.uber.org/zap"
 )
 
-type Handler struct {
-	service *ArchiveService
-}
+type Handler struct{ service *ArchiveService }
 
-// NewHandler keeps the current server bootstrap compatible while business
-// logic is delegated to the archive service.
 func NewHandler(archives *store.MySQLStore, _ *store.RedisStore) *Handler {
 	return NewHandlerWithService(NewArchiveService(archives))
 }
+func NewHandlerWithService(service *ArchiveService) *Handler { return &Handler{service: service} }
 
-func NewHandlerWithService(service *ArchiveService) *Handler {
-	return &Handler{service: service}
-}
-
-func (h *Handler) SaveArchive(ctx context.Context, req *protocol.SaveArchiveReq) (*protocol.SaveArchiveResp, error) {
-	uid := uidFromCtx(ctx)
-	zap.L().Info("保存存档", zap.Int64("uid", uid), zap.Int("dataLen", len(req.Data)))
-	if err := h.service.Save(uid, req.Data); err != nil {
-		zap.L().Error("存档保存失败", zap.Int64("uid", uid), zap.Error(err))
-		return nil, protocol.NewBizError(protocol.ErrArchiveSaveFailed, "存档保存失败")
+func (h *Handler) SaveArchive(ctx context.Context, req *protocolpb.SaveArchiveReq) (*protocolpb.SaveArchiveResp, error) {
+	if err := h.service.Save(uidFromCtx(ctx), req.GetArchive()); err != nil {
+		return nil, protocol.NewBizError(protocol.ErrArchiveSaveFailed, "save archive failed")
 	}
-	return &protocol.SaveArchiveResp{Success: true}, nil
+	return &protocolpb.SaveArchiveResp{Success: true}, nil
 }
-
-func (h *Handler) LoadArchive(ctx context.Context, req *protocol.LoadArchiveReq) (*protocol.LoadArchiveResp, error) {
-	uid := uidFromCtx(ctx)
-	data, err := h.service.Load(uid)
+func (h *Handler) LoadArchive(ctx context.Context, _ *protocolpb.LoadArchiveReq) (*protocolpb.LoadArchiveResp, error) {
+	archive, found, err := h.service.Load(uidFromCtx(ctx))
 	if err != nil {
-		zap.L().Error("加载存档失败", zap.Int64("uid", uid), zap.Error(err))
-		return nil, protocol.NewBizError(protocol.ErrInternal, "加载存档失败")
+		return nil, protocol.NewBizError(protocol.ErrInternal, "load archive failed")
 	}
-	zap.L().Info("加载存档成功", zap.Int64("uid", uid), zap.Int("dataLen", len(data)))
-	return &protocol.LoadArchiveResp{Data: data}, nil
+	return &protocolpb.LoadArchiveResp{Found: found, Archive: archive}, nil
 }
-
 func uidFromCtx(ctx context.Context) int64 {
-	if current := session.FromContext(ctx); current != nil {
-		return current.UID()
+	if s := session.FromContext(ctx); s != nil {
+		return s.UID()
 	}
 	return 0
 }
