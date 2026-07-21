@@ -37,6 +37,7 @@
 - Modify: client `tools/integration/BackendIntegrationSupport.ps1`
 - Modify: client `tools/integration/BackendIntegrationSupport.Tests.ps1`
 - Modify: client `tools/integration/Invoke-A4BackendIntegration.ps1`
+- Modify: client `tools/integration/Invoke-A4BackendIntegration.Tests.ps1`
 
 **Interfaces:**
 - Produces: `payment.NewDisabledHandler() *payment.Handler`.
@@ -73,6 +74,7 @@ go test ./... -count=1
 go vet ./...
 go build ./...
 D:/Unity_Soft/2022/Editor/Unity.exe -batchmode -projectPath E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport -runTests -testPlatform EditMode -testFilter Game.Tests.EditMode.Online.PaymentAndGmSessionServiceTests -testResults Logs/payment-disabled-green.xml -logFile Logs/payment-disabled-green.log
+powershell.exe -NoProfile -Command "Invoke-Pester -Script E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport/tools/integration/BackendIntegrationSupport.Tests.ps1,E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport/tools/integration/Invoke-A4BackendIntegration.Tests.ps1 -EnableExit"
 ```
 
 Expected: all commands exit 0; no listener or callback code remains.
@@ -84,7 +86,7 @@ Run the owned development integration runner once and assert WebSocket login suc
 ```powershell
 git add internal/payment internal/config/config.go internal/protocol/common.go configs/config.yaml cmd/server/main.go cmd/server/main_test.go docs/superpowers/specs/2026-07-21-payment-fail-closed-release-design.md docs/superpowers/plans/2026-07-21-payment-fail-closed-release.md
 git commit -m "fix: disable incomplete payment boundary"
-git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport add Assets/Tests/EditMode/Online/PaymentAndGmSessionServiceTests.cs tools/integration/BackendIntegrationSupport.ps1 tools/integration/BackendIntegrationSupport.Tests.ps1 tools/integration/Invoke-A4BackendIntegration.ps1
+git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport add Assets/Tests/EditMode/Online/PaymentAndGmSessionServiceTests.cs tools/integration/BackendIntegrationSupport.ps1 tools/integration/BackendIntegrationSupport.Tests.ps1 tools/integration/Invoke-A4BackendIntegration.ps1 tools/integration/Invoke-A4BackendIntegration.Tests.ps1
 git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport commit -m "test: cover disabled payment response"
 ```
 
