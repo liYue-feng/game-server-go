@@ -90,8 +90,9 @@ func (m *MySQLConfig) DSN() string {
 
 // WechatConfig 微信小游戏配置
 type WechatConfig struct {
-	AppID     string `mapstructure:"app_id"`     // 小游戏 AppID
-	AppSecret string `mapstructure:"app_secret"` // 小游戏 AppSecret
+	AppID          string `mapstructure:"app_id"`          // 小游戏 AppID
+	AppSecret      string `mapstructure:"app_secret"`      // 小游戏 AppSecret
+	PaymentEnabled bool   `mapstructure:"payment_enabled"` // Payment stays disabled until a secure provider exists.
 
 	// 微信支付配置
 	MchID             string `mapstructure:"mch_id"`               // 微信支付商户号

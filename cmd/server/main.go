@@ -5,12 +5,8 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/signal"
@@ -36,20 +32,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	maxPaymentCallbackBodySize int64 = 1 << 20
-	callbackReadHeaderTimeout        = 5 * time.Second
-	callbackReadTimeout              = 10 * time.Second
-	callbackWriteTimeout             = 10 * time.Second
-	callbackIdleTimeout              = 60 * time.Second
-)
-
 type runtime struct {
-	kernel         *kernel.Kernel
-	server         *transport.Server
-	close          func() error
-	development    bool
-	paymentHandler *payment.Handler
+	kernel      *kernel.Kernel
+	server      *transport.Server
+	close       func() error
+	development bool
 }
 
 var openMySQLStore = func(cfg *config.MySQLConfig) (*store.MySQLStore, func() error, error) {
@@ -69,8 +56,14 @@ var openRedisStore = func(cfg *config.RedisConfig) (*store.RedisStore, func() er
 }
 
 func newRuntime(cfg *config.Config) (*runtime, error) {
+	if cfg.Wechat.PaymentEnabled {
+		return nil, fmt.Errorf("payment is enabled but secure payment provider is unavailable")
+	}
+
 	hookChain := pipeline.New()
 	k := kernel.New(hookChain)
+	disabledPaymentHandler := payment.NewDisabledHandler()
+	k.RegisterRoute(protocol.MsgID_CreateOrderReq, disabledPaymentHandler.CreateOrder)
 
 	if cfg.Development.Enabled {
 		combatConfig := combat.DefaultCombatConfig()
@@ -124,13 +117,11 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 	))
 	gameHandler := game.NewHandlerWithService(game.NewArchiveService(mysqlStore))
 	rankHandler := rank.NewHandler(redisStore, mysqlStore)
-	paymentHandler := payment.NewHandler(mysqlStore, redisStore, &cfg.Wechat)
 	combatHandler := combat.NewHandler(mysqlStore, redisStore)
 
 	registerOnlineSessionHandlers(k, loginHandler, gameHandler)
 	k.RegisterRoute(protocol.MsgID_GetRankReq, rankHandler.GetRank)
 	k.RegisterRoute(protocol.MsgID_SubmitScoreReq, rankHandler.SubmitScore)
-	k.RegisterRoute(protocol.MsgID_CreateOrderReq, paymentHandler.CreateOrder)
 	k.RegisterRoute(protocol.MsgID_CombatResultReq, combatHandler.CombatResult)
 	k.RegisterRoute(protocol.MsgID_GetEnemyConfigsReq, combatHandler.GetEnemyConfigs)
 	k.RegisterRoute(protocol.MsgID_GetDungeonConfigReq, combatHandler.GetDungeonConfig)
@@ -140,7 +131,6 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 	k.RegisterRoute(protocol.MsgID_UpdatePlayerStatsReq, combatHandler.UpdatePlayerStats)
 
 	server := transport.NewServer(k)
-	paymentHandler.SetPusher(server.Hub())
 	gmHandler := gm.NewHandler(mysqlStore, redisStore, server.Hub(), cfg.GM.AdminUIDs)
 	k.RegisterRoute(protocol.MsgID_GMCommandReq, gmHandler.Command)
 
@@ -148,10 +138,9 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 	hookChain.AddBefore(hooks.RateLimit(redisStore, k, 100, time.Second))
 
 	return &runtime{
-		kernel:         k,
-		server:         server,
-		close:          newRuntimeClose(closeRedis, closeMySQL),
-		paymentHandler: paymentHandler,
+		kernel: k,
+		server: server,
+		close:  newRuntimeClose(closeRedis, closeMySQL),
 	}, nil
 }
 
@@ -206,16 +195,6 @@ func main() {
 		}
 	}()
 
-	callbackServer := newPaymentCallbackServer(appRuntime)
-	if callbackServer != nil {
-		go func() {
-			zap.L().Info("payment callback server started", zap.String("addr", callbackServer.Addr))
-			if err := callbackServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				zap.L().Fatal("start payment callback server", zap.Error(err))
-			}
-		}()
-	}
-
 	zap.L().Info("game server started",
 		zap.String("ws_addr", cfg.Server.Addr()),
 		zap.Bool("development", appRuntime.development),
@@ -228,68 +207,10 @@ func main() {
 	signal.Stop(quit)
 	zap.L().Info("shutdown signal received", zap.String("signal", sig.String()))
 
-	if callbackServer != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := callbackServer.Shutdown(ctx); err != nil {
-			zap.L().Error("shutdown payment callback server", zap.Error(err))
-		}
-		cancel()
-	}
-
 	appRuntime.server.Shutdown()
 	if err := appRuntime.close(); err != nil {
 		zap.L().Error("close runtime resources", zap.Error(err))
 	}
 	zap.L().Info("game server stopped")
 	logger.Close()
-}
-
-func newPaymentCallbackServer(appRuntime *runtime) *http.Server {
-	if appRuntime.development || appRuntime.paymentHandler == nil {
-		return nil
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle("/pay/callback", newPaymentCallbackHandler(appRuntime.paymentHandler.HandlePayCallback))
-
-	return &http.Server{
-		Addr:              ":8081",
-		Handler:           mux,
-		ReadHeaderTimeout: callbackReadHeaderTimeout,
-		ReadTimeout:       callbackReadTimeout,
-		WriteTimeout:      callbackWriteTimeout,
-		IdleTimeout:       callbackIdleTimeout,
-	}
-}
-
-func newPaymentCallbackHandler(handle func([]byte) (*payment.CallbackResp, error)) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer r.Body.Close()
-		r.Body = http.MaxBytesReader(w, r.Body, maxPaymentCallbackBodySize)
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			var maxBytesError *http.MaxBytesError
-			if errors.As(err, &maxBytesError) {
-				http.Error(w, "payment callback body too large", http.StatusRequestEntityTooLarge)
-				return
-			}
-			zap.L().Error("read payment callback body", zap.Error(err))
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		response, err := handle(body)
-		if err != nil {
-			zap.L().Error("handle payment callback", zap.Error(err))
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		payload, err := json.Marshal(response)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write(payload)
-	})
 }

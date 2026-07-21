@@ -25,6 +25,7 @@ mysql:
 wechat:
   app_id: ""         # 小游戏 AppID，从微信公众平台获取
   app_secret: ""     # 小游戏 AppSecret，从微信公众平台获取
+  payment_enabled: false # 安全支付提供方未完成前必须保持关闭
   mch_id: ""         # 微信支付商户号
   mch_private_key_path: ""  # 商户私钥文件路径（apiv3）
   mch_cert_serial_no: ""    # 商户证书序列号

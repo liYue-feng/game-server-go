@@ -3,11 +3,11 @@ package main
 import (
 	"context"
 	"errors"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"game-server/internal/combat"
 	"game-server/internal/config"
@@ -68,46 +68,21 @@ func TestProductionWebSocketRouteIDsCoverEveryRequest(t *testing.T) {
 	}
 }
 
-func TestPaymentCallbackRejectsOversizedBodyWithoutCallingHandler(t *testing.T) {
-	callbackCalls := 0
-	handler := newPaymentCallbackHandler(func([]byte) (*payment.CallbackResp, error) {
-		callbackCalls++
-		return &payment.CallbackResp{}, nil
-	})
-	request := httptest.NewRequest(
-		http.MethodPost,
+func TestServerHasNoPaymentCallbackSurface(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("ReadFile(main.go) error = %v", err)
+	}
+	for _, forbidden := range []string{
+		"newPaymentCallbackServer",
+		"newPaymentCallbackHandler",
 		"/pay/callback",
-		strings.NewReader(strings.Repeat("x", int(maxPaymentCallbackBodySize)+1)),
-	)
-	response := httptest.NewRecorder()
-
-	handler.ServeHTTP(response, request)
-
-	if response.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("callback status = %d, want %d", response.Code, http.StatusRequestEntityTooLarge)
-	}
-	if callbackCalls != 0 {
-		t.Fatalf("payment callback calls = %d, want 0", callbackCalls)
-	}
-}
-
-func TestPaymentCallbackServerConfiguresTimeouts(t *testing.T) {
-	server := newPaymentCallbackServer(&runtime{paymentHandler: &payment.Handler{}})
-	if server == nil {
-		t.Fatal("newPaymentCallbackServer() = nil for production runtime")
-	}
-
-	if server.ReadHeaderTimeout != 5*time.Second {
-		t.Errorf("ReadHeaderTimeout = %v, want 5s", server.ReadHeaderTimeout)
-	}
-	if server.ReadTimeout != 10*time.Second {
-		t.Errorf("ReadTimeout = %v, want 10s", server.ReadTimeout)
-	}
-	if server.WriteTimeout != 10*time.Second {
-		t.Errorf("WriteTimeout = %v, want 10s", server.WriteTimeout)
-	}
-	if server.IdleTimeout != 60*time.Second {
-		t.Errorf("IdleTimeout = %v, want 60s", server.IdleTimeout)
+		":8081",
+		"MaxBytesReader",
+	} {
+		if strings.Contains(string(source), forbidden) {
+			t.Errorf("main.go still contains payment callback surface %q", forbidden)
+		}
 	}
 }
 
@@ -142,9 +117,6 @@ func TestNewRuntimeDevelopmentRegistersOnlyOnlineSessionMessages(t *testing.T) {
 	if appRuntime.kernel == nil || appRuntime.server == nil {
 		t.Fatal("development runtime must own kernel and transport server")
 	}
-	if appRuntime.paymentHandler != nil {
-		t.Fatal("development runtime must not initialize payment")
-	}
 
 	present := []uint16{
 		protocol.MsgID_LoginReq,
@@ -153,6 +125,7 @@ func TestNewRuntimeDevelopmentRegistersOnlyOnlineSessionMessages(t *testing.T) {
 		protocol.MsgID_LoadArchiveReq,
 		protocol.MsgID_CombatResultReq,
 		protocol.MsgID_GetPlayerStatsReq,
+		protocol.MsgID_CreateOrderReq,
 	}
 	for _, msgID := range present {
 		if !appRuntime.kernel.HasHandler(msgID) {
@@ -163,7 +136,6 @@ func TestNewRuntimeDevelopmentRegistersOnlyOnlineSessionMessages(t *testing.T) {
 	absent := []uint16{
 		protocol.MsgID_GetRankReq,
 		protocol.MsgID_SubmitScoreReq,
-		protocol.MsgID_CreateOrderReq,
 		protocol.MsgID_GetEnemyConfigsReq,
 		protocol.MsgID_GetDungeonConfigReq,
 		protocol.MsgID_GetStyleConfigsReq,
@@ -184,6 +156,102 @@ func TestNewRuntimeDevelopmentRegistersOnlyOnlineSessionMessages(t *testing.T) {
 	}
 	if appRuntime.kernel.IsAuthFree(protocol.MsgID_SaveArchiveReq) {
 		t.Fatal("archive save must require authentication")
+	}
+}
+
+func TestNewRuntimeDevelopmentReturnsCorrelatedPaymentDisabledError(t *testing.T) {
+	appRuntime, err := newRuntime(&config.Config{
+		Development: config.DevelopmentConfig{Enabled: true, LoginEnabled: true},
+	})
+	if err != nil {
+		t.Fatalf("newRuntime() error = %v", err)
+	}
+	t.Cleanup(func() { _ = appRuntime.close() })
+
+	conn := &runtimeCaptureConn{}
+	ctx := session.WithSession(context.Background(), session.New(conn))
+	dispatchRuntimeRequestSeq(t, appRuntime, ctx, protocol.MsgID_LoginReq, 1,
+		&protocolpb.LoginReq{Code: "dev:payment-disabled"})
+	dispatchRuntimeRequestSeq(t, appRuntime, ctx, protocol.MsgID_CreateOrderReq, 60001,
+		&protocolpb.CreateOrderReq{ProductId: 1})
+
+	if len(conn.frames) != 2 {
+		t.Fatalf("response frames = %d, want 2", len(conn.frames))
+	}
+	message, err := protocol.Decode(conn.frames[1])
+	if err != nil {
+		t.Fatalf("decode payment response: %v", err)
+	}
+	if message.MsgID != protocol.MsgID_Error || message.Seq != 60001 {
+		t.Fatalf("payment response = id %d seq %d, want id %d seq 60001",
+			message.MsgID, message.Seq, protocol.MsgID_Error)
+	}
+	var response protocolpb.ErrorResp
+	if err := proto.Unmarshal(message.Body, &response); err != nil {
+		t.Fatalf("decode payment error: %v", err)
+	}
+	if response.Code != int32(protocol.ErrPaymentUnavailable) || response.Msg != "payment is disabled" {
+		t.Fatalf("payment error = code %d message %q", response.Code, response.Msg)
+	}
+}
+
+func TestNewRuntimeProductionRegistersDisabledPaymentRoute(t *testing.T) {
+	storeCalls := installCountingStoreOpeners(t)
+
+	appRuntime, err := newRuntime(&config.Config{})
+	if err != nil {
+		t.Fatalf("newRuntime() error = %v", err)
+	}
+	t.Cleanup(func() { _ = appRuntime.close() })
+	if *storeCalls != 2 {
+		t.Fatalf("store opener calls = %d, want 2", *storeCalls)
+	}
+	if !appRuntime.kernel.HasHandler(protocol.MsgID_CreateOrderReq) {
+		t.Fatal("production kernel missing disabled payment route")
+	}
+}
+
+func TestNewRuntimeRejectsPaymentEnabledBeforeOpeningStores(t *testing.T) {
+	for _, development := range []bool{false, true} {
+		t.Run(fmt.Sprintf("development=%t", development), func(t *testing.T) {
+			storeCalls := installCountingStoreOpeners(t)
+			appRuntime, err := newRuntime(&config.Config{
+				Wechat:      config.WechatConfig{PaymentEnabled: true},
+				Development: config.DevelopmentConfig{Enabled: development},
+			})
+			if err == nil || !strings.Contains(err.Error(), "secure payment provider is unavailable") {
+				t.Fatalf("newRuntime() error = %v, want secure provider unavailable", err)
+			}
+			if appRuntime != nil {
+				t.Fatal("newRuntime() returned runtime with payment enabled")
+			}
+			if *storeCalls != 0 {
+				t.Fatalf("store opener calls = %d, want 0", *storeCalls)
+			}
+		})
+	}
+}
+
+func TestNewRuntimeRejectsEnvironmentEnabledPaymentBeforeOpeningStores(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("wechat:\n  payment_enabled: false\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	t.Setenv("GAME_WECHAT_PAYMENT_ENABLED", "true")
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("config.Load() error = %v", err)
+	}
+	if !cfg.Wechat.PaymentEnabled {
+		t.Fatal("Wechat.PaymentEnabled = false, want environment override true")
+	}
+	storeCalls := installCountingStoreOpeners(t)
+	appRuntime, err := newRuntime(cfg)
+	if err == nil || !strings.Contains(err.Error(), "secure payment provider is unavailable") {
+		t.Fatalf("newRuntime() error = %v, want secure provider unavailable", err)
+	}
+	if appRuntime != nil || *storeCalls != 0 {
+		t.Fatalf("runtime = %v, store opener calls = %d; want nil and 0", appRuntime, *storeCalls)
 	}
 }
 
@@ -256,11 +324,36 @@ func TestNewRuntimeDevelopmentRoutesSettlementLevelToStats(t *testing.T) {
 
 func dispatchRuntimeRequest(t *testing.T, appRuntime *runtime, ctx context.Context, id uint16, request proto.Message) {
 	t.Helper()
-	frame, err := protocol.Encode(id, 1, request)
+	dispatchRuntimeRequestSeq(t, appRuntime, ctx, id, 1, request)
+}
+
+func dispatchRuntimeRequestSeq(t *testing.T, appRuntime *runtime, ctx context.Context, id uint16, seq uint32, request proto.Message) {
+	t.Helper()
+	frame, err := protocol.Encode(id, seq, request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	appRuntime.kernel.Dispatch(ctx, frame)
+}
+
+func installCountingStoreOpeners(t *testing.T) *int {
+	t.Helper()
+	originalMySQL := openMySQLStore
+	originalRedis := openRedisStore
+	t.Cleanup(func() {
+		openMySQLStore = originalMySQL
+		openRedisStore = originalRedis
+	})
+	calls := 0
+	openMySQLStore = func(*config.MySQLConfig) (*store.MySQLStore, func() error, error) {
+		calls++
+		return nil, func() error { return nil }, nil
+	}
+	openRedisStore = func(*config.RedisConfig) (*store.RedisStore, func() error, error) {
+		calls++
+		return nil, func() error { return nil }, nil
+	}
+	return &calls
 }
 
 func TestNewRuntimeProductionFailsBeforeServingWhenMySQLIsUnavailable(t *testing.T) {

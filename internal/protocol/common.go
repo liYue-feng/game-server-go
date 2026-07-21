@@ -34,6 +34,9 @@ const (
 	ErrCombatConfigNotFound   = 50003 // 战斗配置不存在
 	ErrCombatStyleLocked      = 50004 // 流派未解锁
 	ErrCombatInsufficientGold = 50005 // 金币不足
+
+	// Payment module errors.
+	ErrPaymentUnavailable = 60001
 )
 
 // IsSuccess 判断错误码是否为成功
