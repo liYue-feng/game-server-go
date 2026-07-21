@@ -453,7 +453,7 @@ Required tests: `RequestRegistersPendingBeforeSynchronousResponseCanArrive`, `Re
 - [ ] **Step 2: Run focused Unity tests and verify RED**
 
 ```powershell
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit `
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode `
   -projectPath 'E:\Own_project\game-client-unity' -runTests -testPlatform EditMode `
   -testFilter 'Game.Tests.EditMode.Protocol.ProtobufGoldenFrameTests;Game.Tests.EditMode.Network.NetworkClientTests' `
   -testResults 'Logs\seq-client-red.xml' -logFile 'Logs\seq-client-red.log'
@@ -489,7 +489,7 @@ The request ordering is fixed: first call `payload.ToByteArray()` before touchin
 - [ ] **Step 4: Run focused network tests**
 
 ```powershell
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit `
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode `
   -projectPath 'E:\Own_project\game-client-unity' -runTests -testPlatform EditMode `
   -testFilter 'Game.Tests.EditMode.Protocol.ProtobufGoldenFrameTests;Game.Tests.EditMode.Network' `
   -testResults 'Logs\seq-client-green.xml' -logFile 'Logs\seq-client-green.log'
@@ -530,7 +530,7 @@ The combat retry test decodes the first and second outgoing frames, asserts diff
 - [ ] **Step 2: Run focused tests and verify RED**
 
 ```powershell
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit `
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode `
   -projectPath 'E:\Own_project\game-client-unity' -runTests -testPlatform EditMode `
   -testFilter 'Game.Tests.EditMode.Online' -testResults 'Logs\seq-online-red.xml' `
   -logFile 'Logs\seq-online-red.log'
@@ -559,7 +559,7 @@ Heartbeat uses `Request<HeartbeatReq,HeartbeatResp>` and ignores the success pay
 - [ ] **Step 4: Run online and host tests**
 
 ```powershell
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit `
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode `
   -projectPath 'E:\Own_project\game-client-unity' -runTests -testPlatform EditMode `
   -testFilter 'Game.Tests.EditMode.Online;Game.Tests.EditMode.Network.NetworkConnectionControllerTests' `
   -testResults 'Logs\seq-online-green.xml' -logFile 'Logs\seq-online-green.log'
@@ -598,7 +598,7 @@ Required cases: `ManagerRequestsUseNonZeroCorrelation`, `PaymentCreateOrderUsesR
 - [ ] **Step 2: Run tests and verify RED**
 
 ```powershell
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit `
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode `
   -projectPath 'E:\Own_project\game-client-unity' -runTests -testPlatform EditMode `
   -testFilter 'Game.Tests.EditMode.Network.ManagerNetworkSubscriptionTests;Game.Tests.EditMode.Online.PaymentAndGmSessionServiceTests' `
   -testResults 'Logs\seq-managers-red.xml' -logFile 'Logs\seq-managers-red.log'
@@ -627,7 +627,7 @@ Its request callback handles nonzero `seq`; its `On<GMCommandResp>` subscription
 - [ ] **Step 4: Run EditMode and static legacy scans**
 
 ```powershell
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit `
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode `
   -projectPath 'E:\Own_project\game-client-unity' -runTests -testPlatform EditMode `
   -testResults 'Logs\seq-all-editmode.xml' -logFile 'Logs\seq-all-editmode.log'
 rg -n "\.Send\(MsgID\.|Codec\.Encode\([^,]+,[^,]+\)|TryDecode\([^,]+,\s*out\s+[^,]+,\s*out\s+[^,]+\)" Assets/Scripts Assets/Tests -g '*.cs'
@@ -699,8 +699,8 @@ go build ./...
 Set-Location E:\Own_project\game-client-unity
 powershell.exe -NoProfile -File tools/protobuf/Verify-GeneratedProtocol.ps1 -BackendRoot E:\Own_project\game-server-go
 powershell.exe -NoProfile -Command "Invoke-Pester -Script tools/protobuf/GeneratedProtocol.Tests.ps1,tools/integration/Invoke-A4BackendIntegration.Tests.ps1 -EnableExit"
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit -projectPath . -runTests -testPlatform EditMode -testResults Logs\seq-final-editmode.xml -logFile Logs\seq-final-editmode.log
-& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -nographics -quit -projectPath . -runTests -testPlatform PlayMode -testResults Logs\seq-final-playmode.xml -logFile Logs\seq-final-playmode.log
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -projectPath . -runTests -testPlatform EditMode -testResults Logs\seq-final-editmode.xml -logFile Logs\seq-final-editmode.log
+& 'D:\Unity_Soft\2022\Editor\Unity.exe' -batchmode -projectPath . -runTests -testPlatform PlayMode -testResults Logs\seq-final-playmode.xml -logFile Logs\seq-final-playmode.log
 1..3 | ForEach-Object { & .\tools\integration\Invoke-A4BackendIntegration.ps1 -BackendRoot E:\Own_project\game-server-go }
 ```
 
