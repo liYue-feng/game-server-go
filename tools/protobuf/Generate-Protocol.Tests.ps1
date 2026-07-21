@@ -4,6 +4,59 @@ function Get-RawSha256([string]$Path) {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
 }
 
+function Test-ContainsStaleTransportDescription([string]$Content) {
+    foreach ($line in [regex]::Split($Content, '\r?\n')) {
+        if ($line -match '(?i)6[- ]bytes?|six[- ]bytes?|6\s*\u5B57\u8282|\u516D\u5B57\u8282|Length\s*=\s*6\s*\+') {
+            return $true
+        }
+        if ($line -match '(?i)Length.*MsgID' -and $line -notmatch '(?i)Seq') {
+            return $true
+        }
+
+        $compact = [regex]::Replace($line, '\s+', '')
+        $unsequencedTwoFieldFrame = '(?i)(?:4B|4bytes?|4\u5B57\u8282)(?:Length|(?:\u603B)?\u957F\u5EA6)\+(?:2B|2bytes?|2\u5B57\u8282)(?:MsgID|MessageID|\u6D88\u606F(?:ID|\u7F16\u53F7))'
+        if ($compact -notmatch '(?i)(?:Seq|\u5E8F\u5217)' -and $compact -match $unsequencedTwoFieldFrame) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-ComposeKeepsPaymentPortDisabled([string]$Content) {
+    foreach ($line in [regex]::Split($Content, '\r?\n')) {
+        $candidate = ($line -replace '\s+#.*$', '').Trim()
+        if ($candidate -match '(?i)\btarget\s*:\s*["'']?8081["'']?(?:\s*[,}]|\s*$)') {
+            return $false
+        }
+        if (-not $candidate.StartsWith('-')) {
+            continue
+        }
+
+        $value = $candidate.Substring(1).Trim().Trim([char]0x22, [char]0x27)
+        if ($value -match '(?i)(?:^|:)8081(?:/(?:tcp|udp))?$') {
+            return $false
+        }
+    }
+
+    return $true
+}
+
+function Test-ContainsActivePaymentClaim([string]$Content) {
+    $activePatterns = @(
+        '(?im)(?<!\u4E0D)(?:\u63A5\u53D7|\u5904\u7406|\u542F\u7528|\u542F\u52A8|\u63D0\u4F9B)[^\r\n]{0,16}\u652F\u4ED8\u56DE\u8C03',
+        '(?im)(?<!\u4E0D)(?:\u76D1\u542C|\u66B4\u9732|\u53D1\u5E03)[^\r\n]{0,16}(?:\u7AEF\u53E3\s*)?8081',
+        '(?im)\u652F\u4ED8(?:\u6210\u529F|\u5B8C\u6210|\u56DE\u8C03)[^\r\n]{0,24}(?<!\u4E0D)(?:\u53D1\u653E|\u53D1\u8D27|\u6388\u4E88)'
+    )
+    foreach ($pattern in $activePatterns) {
+        if ($Content -match $pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 . (Join-Path $PSScriptRoot 'PeerRootResolver.ps1')
 $projectParent = Split-Path $projectRoot -Parent
@@ -19,19 +72,76 @@ Describe 'Authoritative transport documentation' {
         It "documents the sequenced protobuf frame in $relativePath" {
             $content = [IO.File]::ReadAllText((Join-Path $projectRoot $relativePath))
             $content | Should Match ([regex]::Escape($transportContract))
-            $content | Should Not Match '(?i)6[- ]byte|six[- ]byte|6\s*字节|六字节|Length\s*=\s*6\s*\+|4B长度\s*\+\s*2B'
-            $content | Should Not Match '(?im)^(?=.*Length)(?=.*MsgID)(?!.*Seq).*$'
+            (Test-ContainsStaleTransportDescription -Content $content) | Should Be $false
         }
+    }
+
+    foreach ($case in @(
+        @{ Name = 'English words'; Content = 'Frame header: 4 bytes length + 2 bytes message ID.' },
+        @{ Name = 'spaced Chinese abbreviations'; Content = [regex]::Unescape('\u5E27\u5934\uFF1A4B \u957F\u5EA6 + 2B \u6D88\u606F ID\u3002') },
+        @{ Name = 'full Chinese units'; Content = [regex]::Unescape('\u5E27\u5934\uFF1A4 \u5B57\u8282\u957F\u5EA6 + 2 \u5B57\u8282\u6D88\u606F ID\u3002') }
+    )) {
+        It "rejects the $($case.Name) unsequenced frame description" {
+            (Test-ContainsStaleTransportDescription -Content $case.Content) | Should Be $true
+        }
+    }
+
+    It 'allows a complete sequenced frame description' {
+        (Test-ContainsStaleTransportDescription -Content 'Frame header: 4B Length + 2B MsgID + 4B Seq.') | Should Be $false
     }
 
     It 'marks payment protocol IDs as reserved while production payment is disabled' {
         $readme = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
         $readme | Should Match 'Payment protocol IDs 5001-5003 are reserved; production payment is disabled\.'
+        (Test-ContainsActivePaymentClaim -Content $readme) | Should Be $false
     }
 
-    It 'does not publish the disabled payment callback port' {
+    It 'does not publish the disabled payment callback port in Docker Compose' {
         $compose = [IO.File]::ReadAllText((Join-Path $projectRoot 'docker-compose.yml'))
-        $compose | Should Not Match '(?m)^\s*-\s*["'']?8081:8081'
+        (Test-ComposeKeepsPaymentPortDisabled -Content $compose) | Should Be $true
+    }
+
+    foreach ($case in @(
+        @{ Name = 'host IP binding'; Section = 'ports'; Value = '127.0.0.1:18081:8081' },
+        @{ Name = 'remapped host port'; Section = 'ports'; Value = '18081:8081' },
+        @{ Name = 'long syntax target'; Section = 'ports'; Value = 'target: 8081' },
+        @{ Name = 'bare exposed port'; Section = 'expose'; Value = '8081' }
+    )) {
+        It "rejects the $($case.Name) Compose payment port form" {
+            $fixture = @('services:', '  game-server:', "    $($case.Section):", "      - $($case.Value)") -join "`n"
+            (Test-ComposeKeepsPaymentPortDisabled -Content $fixture) | Should Be $false
+        }
+    }
+
+    It 'allows an 8080-only Compose port list' {
+        $fixture = @('services:', '  game-server:', '    ports:', '      - "8080:8080"') -join "`n"
+        (Test-ComposeKeepsPaymentPortDisabled -Content $fixture) | Should Be $true
+    }
+
+    foreach ($case in @(
+        @{ Name = 'active callback'; Content = [regex]::Unescape('\u670D\u52A1\u7AEF\u63A5\u53D7\u652F\u4ED8\u56DE\u8C03\u3002') },
+        @{ Name = 'active listener'; Content = [regex]::Unescape('\u670D\u52A1\u7AEF\u76D1\u542C\u7AEF\u53E3 8081\u3002') },
+        @{ Name = 'active fulfillment'; Content = [regex]::Unescape('\u652F\u4ED8\u6210\u529F\u540E\u53D1\u653E\u5546\u54C1\u5E76\u63A8\u9001 PayResultNotify\u3002') }
+    )) {
+        It "rejects the $($case.Name) README claim" {
+            (Test-ContainsActivePaymentClaim -Content $case.Content) | Should Be $true
+        }
+    }
+
+    It 'allows explicit payment callback and fulfillment negation' {
+        $fixture = [regex]::Unescape('\u670D\u52A1\u7AEF\u4E0D\u63A5\u53D7\u652F\u4ED8\u56DE\u8C03\uFF0C\u4E5F\u4E0D\u76D1\u542C\u7AEF\u53E3 8081\uFF1B\u5F53\u524D\u4E0D\u521B\u5EFA\u3001\u4E0D\u66F4\u65B0\u3001\u4E0D\u53D1\u8D27\u3002')
+        (Test-ContainsActivePaymentClaim -Content $fixture) | Should Be $false
+    }
+
+    It 'exposes only the game port in the production Dockerfile' {
+        $dockerfile = [IO.File]::ReadAllText((Join-Path $projectRoot 'Dockerfile'))
+        @([regex]::Matches($dockerfile, '(?im)^\s*EXPOSE[^\r\n]*')).Count | Should Be 1
+        $dockerfile | Should Match '(?im)^\s*EXPOSE\s+8080\s*$'
+    }
+
+    It 'contains no active payment callback claim in the production Dockerfile' {
+        $dockerfile = [IO.File]::ReadAllText((Join-Path $projectRoot 'Dockerfile'))
+        $dockerfile | Should Not Match '(?im)^#.*(?:payment\s+callback|\u652F\u4ED8\u56DE\u8C03)'
     }
 }
 

@@ -41,8 +41,7 @@ COPY --from=builder /app/configs ./configs
 
 # 暴露端口
 # 8080: WebSocket 游戏服务
-# 8081: HTTP 回调服务（微信支付回调）
-EXPOSE 8080 8081
+EXPOSE 8080
 
 # 运行
 ENTRYPOINT ["./game-server"]
