@@ -22,6 +22,7 @@ const (
 
 type probe struct {
 	conn *websocket.Conn
+	seq  uint32
 }
 
 func main() {
@@ -44,11 +45,12 @@ func runProbe(address string) error {
 	if err != nil {
 		return err
 	}
-	if err := p.send(protocol.MsgID_LoginReq, &protocolpb.LoginReq{Code: loginCode}); err != nil {
+	seq, err := p.send(protocol.MsgID_LoginReq, &protocolpb.LoginReq{Code: loginCode})
+	if err != nil {
 		return err
 	}
 	var loginResponse protocolpb.LoginResp
-	if err := p.read(protocol.MsgID_LoginResp, &loginResponse); err != nil {
+	if err := p.read(protocol.MsgID_LoginResp, seq, &loginResponse); err != nil {
 		return err
 	}
 	if loginResponse.Uid <= 0 {
@@ -58,11 +60,12 @@ func runProbe(address string) error {
 		return fmt.Errorf("login token is empty")
 	}
 
-	if err := p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
+	seq, err = p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{})
+	if err != nil {
 		return err
 	}
 	var initialLoad protocolpb.LoadArchiveResp
-	if err := p.read(protocol.MsgID_LoadArchiveResp, &initialLoad); err != nil {
+	if err := p.read(protocol.MsgID_LoadArchiveResp, seq, &initialLoad); err != nil {
 		return err
 	}
 	if initialLoad.Found {
@@ -70,22 +73,24 @@ func runProbe(address string) error {
 	}
 
 	expectedArchive := newProbeArchive()
-	if err := p.send(protocol.MsgID_SaveArchiveReq, &protocolpb.SaveArchiveReq{Archive: expectedArchive}); err != nil {
+	seq, err = p.send(protocol.MsgID_SaveArchiveReq, &protocolpb.SaveArchiveReq{Archive: expectedArchive})
+	if err != nil {
 		return err
 	}
 	var saveResponse protocolpb.SaveArchiveResp
-	if err := p.read(protocol.MsgID_SaveArchiveResp, &saveResponse); err != nil {
+	if err := p.read(protocol.MsgID_SaveArchiveResp, seq, &saveResponse); err != nil {
 		return err
 	}
 	if !saveResponse.Success {
 		return fmt.Errorf("archive save success = false")
 	}
 
-	if err := p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
+	seq, err = p.send(protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{})
+	if err != nil {
 		return err
 	}
 	var finalLoad protocolpb.LoadArchiveResp
-	if err := p.read(protocol.MsgID_LoadArchiveResp, &finalLoad); err != nil {
+	if err := p.read(protocol.MsgID_LoadArchiveResp, seq, &finalLoad); err != nil {
 		return err
 	}
 	if !finalLoad.Found || !proto.Equal(finalLoad.Archive, expectedArchive) {
@@ -93,22 +98,24 @@ func runProbe(address string) error {
 	}
 
 	combatRequest := newProbeCombatResult(loginCode)
-	if err := p.send(protocol.MsgID_CombatResultReq, combatRequest); err != nil {
+	seq, err = p.send(protocol.MsgID_CombatResultReq, combatRequest)
+	if err != nil {
 		return err
 	}
 	var firstSettlement protocolpb.CombatResultResp
-	if err := p.read(protocol.MsgID_CombatResultResp, &firstSettlement); err != nil {
+	if err := p.read(protocol.MsgID_CombatResultResp, seq, &firstSettlement); err != nil {
 		return err
 	}
 	if !firstSettlement.Success || firstSettlement.Duplicate || firstSettlement.Archive == nil {
 		return fmt.Errorf("first combat settlement = %v, want successful non-duplicate archive response", &firstSettlement)
 	}
 
-	if err := p.send(protocol.MsgID_CombatResultReq, combatRequest); err != nil {
+	seq, err = p.send(protocol.MsgID_CombatResultReq, combatRequest)
+	if err != nil {
 		return err
 	}
 	var duplicateSettlement protocolpb.CombatResultResp
-	if err := p.read(protocol.MsgID_CombatResultResp, &duplicateSettlement); err != nil {
+	if err := p.read(protocol.MsgID_CombatResultResp, seq, &duplicateSettlement); err != nil {
 		return err
 	}
 	if !duplicateSettlement.Success || !duplicateSettlement.Duplicate || !proto.Equal(duplicateSettlement.Archive, firstSettlement.Archive) || duplicateSettlement.RewardGold != firstSettlement.RewardGold || duplicateSettlement.RewardExp != firstSettlement.RewardExp || duplicateSettlement.BestScore != firstSettlement.BestScore {
@@ -163,21 +170,25 @@ func (p *probe) close() {
 	_ = p.conn.Close()
 }
 
-func (p *probe) send(msgID uint16, payload proto.Message) error {
-	frame, err := protocol.Encode(msgID, payload)
+func (p *probe) send(msgID uint16, payload proto.Message) (uint32, error) {
+	p.seq++
+	if p.seq == 0 {
+		p.seq = 1
+	}
+	frame, err := protocol.Encode(msgID, p.seq, payload)
 	if err != nil {
-		return fmt.Errorf("encode message %d: %w", msgID, err)
+		return 0, fmt.Errorf("encode message %d: %w", msgID, err)
 	}
 	if err := p.conn.SetWriteDeadline(time.Now().Add(probeTimeout)); err != nil {
-		return fmt.Errorf("set write deadline for message %d: %w", msgID, err)
+		return 0, fmt.Errorf("set write deadline for message %d: %w", msgID, err)
 	}
 	if err := p.conn.WriteMessage(websocket.BinaryMessage, frame); err != nil {
-		return fmt.Errorf("write message %d: %w", msgID, err)
+		return 0, fmt.Errorf("write message %d: %w", msgID, err)
 	}
-	return nil
+	return p.seq, nil
 }
 
-func (p *probe) read(expectedMsgID uint16, destination proto.Message) error {
+func (p *probe) read(expectedMsgID uint16, expectedSeq uint32, destination proto.Message) error {
 	if err := p.conn.SetReadDeadline(time.Now().Add(probeTimeout)); err != nil {
 		return fmt.Errorf("set read deadline for message %d: %w", expectedMsgID, err)
 	}
@@ -202,6 +213,9 @@ func (p *probe) read(expectedMsgID uint16, destination proto.Message) error {
 	}
 	if message.MsgID != expectedMsgID {
 		return fmt.Errorf("response message id = %d, want %d", message.MsgID, expectedMsgID)
+	}
+	if message.Seq != expectedSeq {
+		return fmt.Errorf("response seq = %d, want %d", message.Seq, expectedSeq)
 	}
 	if err := proto.Unmarshal(message.Body, destination); err != nil {
 		return fmt.Errorf("decode message %d body: %w", expectedMsgID, err)

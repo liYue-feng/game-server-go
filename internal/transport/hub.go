@@ -20,6 +20,7 @@ type Hub struct {
 	register    chan *Connection
 	unregister  chan *Connection
 	broadcast   chan broadcastRequest
+	pushToUID   chan pushToUIDRequest
 	count       chan chan int
 	closeAll    chan struct{} // 优雅关闭信号：要求断开所有连接并结束 Run
 	done        chan struct{} // Run 退出后关闭，供 Shutdown 等待
@@ -31,6 +32,12 @@ type broadcastRequest struct {
 	msgID uint16
 	data  []byte
 }
+type pushToUIDRequest struct {
+	uid       int64
+	msgID     uint16
+	data      []byte
+	delivered chan bool
+}
 
 // NewHub 创建连接管理中心。
 func NewHub() *Hub {
@@ -39,6 +46,7 @@ func NewHub() *Hub {
 		register:    make(chan *Connection),
 		unregister:  make(chan *Connection),
 		broadcast:   make(chan broadcastRequest),
+		pushToUID:   make(chan pushToUIDRequest),
 		count:       make(chan chan int),
 		closeAll:    make(chan struct{}),
 		done:        make(chan struct{}),
@@ -89,6 +97,15 @@ func (h *Hub) run() {
 					}
 				}
 			}
+		case request := <-h.pushToUID:
+			delivered := false
+			for conn := range h.connections {
+				if conn.sess.UID() == request.uid && conn.enqueue(request.data) == nil {
+					delivered = true
+					break
+				}
+			}
+			request.delivered <- delivered
 
 		case response := <-h.count:
 			response <- len(h.connections)
@@ -102,6 +119,23 @@ func (h *Hub) run() {
 			}
 			return
 		}
+	}
+}
+
+func (h *Hub) PushToUID(uid int64, msgID uint16, payload proto.Message) bool {
+	data, err := protocol.Encode(msgID, 0, payload)
+	if err != nil {
+		return false
+	}
+	h.start()
+	result := make(chan bool, 1)
+	select {
+	case h.pushToUID <- pushToUIDRequest{uid: uid, msgID: msgID, data: data, delivered: result}:
+		return <-result
+	case <-h.closeAll:
+		return false
+	case <-h.done:
+		return false
 	}
 }
 
@@ -148,7 +182,7 @@ func (h *Hub) OnlineCount() int {
 
 // Broadcast 向所有在线连接广播消息（服务器公告、活动通知等）。
 func (h *Hub) Broadcast(msgID uint16, payload proto.Message) {
-	data, err := protocol.Encode(msgID, payload)
+	data, err := protocol.Encode(msgID, 0, payload)
 	if err != nil {
 		zap.L().Error("广播消息编码失败", zap.Error(err))
 		return

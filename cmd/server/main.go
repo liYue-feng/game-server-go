@@ -140,6 +140,7 @@ func newRuntime(cfg *config.Config) (*runtime, error) {
 	k.RegisterRoute(protocol.MsgID_UpdatePlayerStatsReq, combatHandler.UpdatePlayerStats)
 
 	server := transport.NewServer(k)
+	paymentHandler.SetPusher(server.Hub())
 	gmHandler := gm.NewHandler(mysqlStore, redisStore, server.Hub(), cfg.GM.AdminUIDs)
 	k.RegisterRoute(protocol.MsgID_GMCommandReq, gmHandler.Command)
 

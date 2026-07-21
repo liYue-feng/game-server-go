@@ -15,6 +15,11 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+var probeResponseSequences = struct {
+	sync.Mutex
+	values map[*websocket.Conn]uint32
+}{values: make(map[*websocket.Conn]uint32)}
+
 func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 	var mu sync.Mutex
 	archives := map[string]*protocolpb.PlayerArchive{}
@@ -121,7 +126,11 @@ func readProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) er
 	return proto.Unmarshal(decoded.Body, message)
 }
 func writeProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) error {
-	frame, err := protocol.Encode(id, message)
+	probeResponseSequences.Lock()
+	probeResponseSequences.values[conn]++
+	seq := probeResponseSequences.values[conn]
+	probeResponseSequences.Unlock()
+	frame, err := protocol.Encode(id, seq, message)
 	if err != nil {
 		return err
 	}

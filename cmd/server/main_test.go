@@ -115,13 +115,16 @@ type runtimeCaptureConn struct {
 	frames [][]byte
 }
 
-func (c *runtimeCaptureConn) SendMessage(msgID uint16, payload proto.Message) error {
-	frame, err := protocol.Encode(msgID, payload)
+func (c *runtimeCaptureConn) Reply(seq uint32, msgID uint16, payload proto.Message) error {
+	frame, err := protocol.Encode(msgID, seq, payload)
 	if err != nil {
 		return err
 	}
 	c.frames = append(c.frames, frame)
 	return nil
+}
+func (c *runtimeCaptureConn) Push(msgID uint16, payload proto.Message) error {
+	return c.Reply(0, msgID, payload)
 }
 
 func TestNewRuntimeDevelopmentRegistersOnlyOnlineSessionMessages(t *testing.T) {
@@ -195,7 +198,7 @@ func TestNewRuntimeDevelopmentInstallsAuthenticationHook(t *testing.T) {
 
 	conn := &runtimeCaptureConn{}
 	ctx := session.WithSession(context.Background(), session.New(conn))
-	frame, err := protocol.Encode(protocol.MsgID_SaveArchiveReq, &protocolpb.SaveArchiveReq{})
+	frame, err := protocol.Encode(protocol.MsgID_SaveArchiveReq, 1, &protocolpb.SaveArchiveReq{})
 	if err != nil {
 		t.Fatalf("encode request: %v", err)
 	}
@@ -253,7 +256,7 @@ func TestNewRuntimeDevelopmentRoutesSettlementLevelToStats(t *testing.T) {
 
 func dispatchRuntimeRequest(t *testing.T, appRuntime *runtime, ctx context.Context, id uint16, request proto.Message) {
 	t.Helper()
-	frame, err := protocol.Encode(id, request)
+	frame, err := protocol.Encode(id, 1, request)
 	if err != nil {
 		t.Fatal(err)
 	}

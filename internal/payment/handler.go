@@ -34,6 +34,8 @@ import (
 // Handler 支付处理器（组件）。
 type Handler struct {
 	mysql    *store.MySQLStore
+	orders   OrderStore
+	pusher   UIDPusher
 	redis    *store.RedisStore
 	verifier *CallbackVerifier // 回调签名验证器
 	wxPay    *WechatPayClient  // 微信支付 API 客户端
@@ -43,11 +45,14 @@ type Handler struct {
 func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore, cfg *config.WechatConfig) *Handler {
 	return &Handler{
 		mysql:    mysql,
+		orders:   mysql,
 		redis:    redis,
 		verifier: NewCallbackVerifier(cfg),
 		wxPay:    NewWechatPayClient(cfg),
 	}
 }
+
+func (h *Handler) SetPusher(pusher UIDPusher) { h.pusher = pusher }
 
 // CreateOrder 处理创建订单请求（WebSocket）。
 //
@@ -72,7 +77,7 @@ func (h *Handler) CreateOrder(ctx context.Context, req *protocolpb.CreateOrderRe
 		Amount:    product.Price,
 		Status:    store.OrderStatusPending,
 	}
-	if err := h.mysql.CreateOrder(order); err != nil {
+	if err := h.orders.CreateOrder(order); err != nil {
 		zap.L().Error("创建订单失败", zap.Error(err))
 		return nil, protocol.NewBizError(protocol.ErrInternal, "创建订单失败")
 	}
@@ -103,7 +108,7 @@ func (h *Handler) HandlePayCallback(body []byte) (*CallbackResp, error) {
 	zap.L().Info("收到支付回调", zap.String("orderNo", notify.OrderNo), zap.Int("status", notify.Status))
 
 	// 3. 幂等检查：查询订单状态
-	order, err := h.mysql.GetOrderByOrderNo(notify.OrderNo)
+	order, err := h.orders.GetOrderByOrderNo(notify.OrderNo)
 	if err != nil {
 		return nil, fmt.Errorf("查询订单失败: %w", err)
 	}
@@ -113,7 +118,7 @@ func (h *Handler) HandlePayCallback(body []byte) (*CallbackResp, error) {
 	}
 
 	// 4. 更新订单状态为已支付
-	if err := h.mysql.UpdateOrderStatus(notify.OrderNo, store.OrderStatusPaid); err != nil {
+	if err := h.orders.UpdateOrderStatus(notify.OrderNo, store.OrderStatusPaid); err != nil {
 		return nil, fmt.Errorf("更新订单状态失败: %w", err)
 	}
 
@@ -124,8 +129,11 @@ func (h *Handler) HandlePayCallback(body []byte) (*CallbackResp, error) {
 	}
 
 	// 6. 更新订单状态为已发货
-	if err := h.mysql.UpdateOrderStatus(notify.OrderNo, store.OrderStatusDelivered); err != nil {
-		zap.L().Error("更新发货状态失败", zap.Error(err))
+	if err := h.orders.UpdateOrderStatus(notify.OrderNo, store.OrderStatusDelivered); err != nil {
+		return nil, fmt.Errorf("update delivered order status: %w", err)
+	}
+	if h.pusher != nil {
+		h.pusher.PushToUID(order.PlayerID, protocol.MsgID_PayResultNotify, &protocolpb.PayResultNotify{OrderNo: notify.OrderNo, Status: "success", ProductId: int32(order.ProductID)})
 	}
 
 	zap.L().Info("支付完成，道具已发放", zap.String("orderNo", notify.OrderNo), zap.Int64("uid", order.PlayerID))
