@@ -8,6 +8,7 @@ $generatedGoPath = Join-Path $backendRoot 'internal\protocolpb\game.pb.go'
 $codecPath = Join-Path $backendRoot 'internal\protocol\codec.go'
 $kernelPath = Join-Path $backendRoot 'internal\kernel\kernel.go'
 $connectionPath = Join-Path $backendRoot 'internal\transport\connection.go'
+. (Join-Path $PSScriptRoot 'PeerRootResolver.ps1')
 
 function Assert-Contains {
     param([string]$Content, [string]$Expected)
@@ -106,42 +107,29 @@ $kernel = Get-Content -LiteralPath $kernelPath -Raw
 $connection = Get-Content -LiteralPath $connectionPath -Raw
 Assert-Contains -Content $connection -Expected 'return c.sendMessage(0, msgID, payload)'
 
-if ([string]::IsNullOrWhiteSpace($ClientRoot)) {
-    $backendParent = Split-Path $backendRoot -Parent
-    $isWorktree = (Split-Path $backendParent -Leaf) -eq '.worktrees'
-    $workspaceRoot = if ($isWorktree) {
-        Split-Path (Split-Path $backendParent -Parent) -Parent
-    }
-    else {
-        $backendParent
-    }
-    $worktreeName = Split-Path $backendRoot -Leaf
-    $candidates = if ($isWorktree) {
-        @(
-            (Join-Path $workspaceRoot "game-client-unity\.worktrees\$worktreeName"),
-            (Join-Path $workspaceRoot 'game-client-unity')
-        )
-    }
-    else {
-        @((Join-Path $workspaceRoot 'game-client-unity'))
-    }
-    $ClientRoot = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
+$ClientRoot = Resolve-PeerRepositoryRoot -CurrentRoot $backendRoot -ExplicitPeerRoot $ClientRoot `
+    -PeerRepositoryName 'game-client-unity' -PeerDescription 'client'
+$clientSchemaPath = Join-Path $ClientRoot 'proto\game.proto'
+if (-not (Test-Path -LiteralPath $clientSchemaPath -PathType Leaf)) {
+    throw "Sibling client schema is missing: $clientSchemaPath"
 }
-
-if (-not [string]::IsNullOrWhiteSpace($ClientRoot)) {
-    $ClientRoot = (Resolve-Path $ClientRoot).Path
-    $clientSchemaPath = Join-Path $ClientRoot 'proto\game.proto'
-    if (-not (Test-Path -LiteralPath $clientSchemaPath -PathType Leaf)) {
-        throw "Sibling client schema is missing: $clientSchemaPath"
-    }
-    if ((Get-RawSha256 -Path $schemaPath) -ne (Get-RawSha256 -Path $clientSchemaPath)) {
-        throw "Server and client schema SHA256 values differ: '$schemaPath' versus '$clientSchemaPath'."
-    }
+if ((Get-RawSha256 -Path $schemaPath) -ne (Get-RawSha256 -Path $clientSchemaPath)) {
+    throw "Server and client schema SHA256 values differ: '$schemaPath' versus '$clientSchemaPath'."
 }
 
 & (Join-Path $PSScriptRoot 'Generate-Protocol.ps1') -Check
 if ($LASTEXITCODE -ne 0) { throw 'Generated protocol drift check failed.' }
 
+Push-Location $backendRoot
+try {
+    & go test ./internal/protocol ./internal/kernel ./internal/transport `
+        -run 'Test(LoginReqGoldenSequencedFrame|DecodeRoundTripsSeqAndRejectsSixByteFrame|KernelEchoesRequestSeq|MalformedBodyErrorEchoesRequestSeq|KernelRejectsZeroSeqWithoutErrorFrame|HubPushFramesUseZeroSeq|ReadPumpClosesOnFatalProtocolFramesWithoutErrorResponse)$' `
+        -count=1
+    if ($LASTEXITCODE -ne 0) { throw 'Executable sequenced frame verification failed.' }
+}
+finally { Pop-Location }
+
 Write-Output "Schema SHA256=$(Get-RawSha256 -Path $schemaPath)"
 Write-Output "Go output SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $generatedGoPath).Hash)"
+Write-Output 'FRAME_TESTS=PASS'
 Write-Output 'FRAME_EVIDENCE=header=10 little_endian=1 request_seq_nonzero=1 response_seq_echo=1 pushes_seq_zero=1'

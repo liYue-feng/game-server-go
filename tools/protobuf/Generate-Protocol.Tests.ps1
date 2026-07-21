@@ -5,30 +5,12 @@ function Get-RawSha256([string]$Path) {
 }
 
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+. (Join-Path $PSScriptRoot 'PeerRootResolver.ps1')
 $projectParent = Split-Path $projectRoot -Parent
 $isWorktree = (Split-Path $projectParent -Leaf) -eq '.worktrees'
-$workspaceRoot = if ($isWorktree) {
-    Split-Path (Split-Path $projectParent -Parent) -Parent
-}
-else {
-    $projectParent
-}
-$worktreeName = Split-Path $projectRoot -Leaf
-$clientCandidates = if ($isWorktree) {
-    @(
-        (Join-Path $workspaceRoot "game-client-unity\.worktrees\$worktreeName"),
-        (Join-Path $workspaceRoot 'game-client-unity')
-    )
-}
-else {
-    @((Join-Path $workspaceRoot 'game-client-unity'))
-}
-$clientRoot = $clientCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
-
-if ([string]::IsNullOrWhiteSpace($clientRoot)) {
-    throw 'A sibling game-client-unity checkout is required for schema hash tests.'
-}
-$clientRoot = (Resolve-Path $clientRoot).Path
+$explicitClientRoot = if ($isWorktree) { $null } else { Join-Path $projectParent 'game-client-unity' }
+$clientRoot = Resolve-PeerRepositoryRoot -CurrentRoot $projectRoot -ExplicitPeerRoot $explicitClientRoot `
+    -PeerRepositoryName 'game-client-unity' -PeerDescription 'client'
 
 Describe 'Canonical schema ownership' {
     It 'owns one local game.proto and rejects the old source names' {
