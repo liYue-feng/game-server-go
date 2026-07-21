@@ -61,6 +61,7 @@ Unity 客户端：
 - `MaxFrameSize = 64 KiB`，包含帧头。
 - 普通请求必须使用非零 `seq`。
 - 服务端主动推送必须使用 `seq = 0`。
+- 服务端收到普通请求 `seq = 0` 属于协议违规，必须直接关闭连接，且不得发送 `seq = 0` 的 `ErrorResp`，避免客户端把该响应误当作推送。
 
 黄金帧：`LoginReq { code: "abc" }`、`MsgID = 1001`、`seq = 1` 的完整字节为：
 
@@ -92,12 +93,19 @@ bool CancelRequest(uint seq)
 - 回绕时跳过 pending 表中仍占用的序列号。
 - pending 表必须线程安全，记录期望响应 MsgID、解析器、成功回调和失败回调。
 
+`Request` 的原子顺序和返回语义：
+
+- 调用进入时先将 `out seq` 置为 `0`，并先完成 Protobuf 编码；编码失败时不分配 `seq`、不注册 pending，保持 `seq = 0` 并返回 `false`。
+- 编码成功后，发送前分配非零 `seq` 并注册对应 pending；只有注册成功后才能发送。pending 注册与后续同步发送失败时的移除必须受同一原子完成语义保护，任何响应都不能早于其 pending 注册被处理。
+- 同步发送失败时，原子移除该 pending，仅调用一次失败回调，返回 `false`；此时 `out seq` 保留已分配的值，仅用于诊断，且该 `seq` 不再 pending。
+- 同步发送成功时返回 `true`。
+
 完成规则：
 
 - 正常响应、`ErrorResp`、错误 MsgID、Body 解析失败、主动取消、断线和 `Dispose` 都只能完成一次。
 - `seq != 0` 只进入 pending 响应路径；未知非零 `seq` 记录日志后丢弃。
 - `seq = 0` 只进入现有 `On<T>` 推送分发路径。
-- 重试由现有业务协调器负责，每次重试分配新 `seq`，但复用同一个业务 `run_id`。
+- 重试由现有业务协调器负责。在发起新尝试前必须调用 `CancelRequest(oldSeq)` 取消旧 transport pending；新尝试分配新 `seq`，但复用同一个业务 `run_id`。旧成功响应或旧 `ErrorResp` 即使迟到，也按未知 `seq` 丢弃，不得影响新尝试。
 - 迁移全部请求调用点：登录、心跳、存档、排行、战斗、配置、支付、GM。
 
 ## 6. 服务端响应与推送
@@ -124,7 +132,7 @@ Push(msgID uint16, payload proto.Message)
 
 `Push` 始终编码为 `seq = 0`。Hub 广播、支付通知和 GM 推送都使用 `Push`。
 
-结构不完整或非法长度的帧头直接关闭连接。帧结构有效但业务请求无效时，返回带该帧 `seq` 的 `ErrorResp`。
+结构不完整或非法长度的帧头直接关闭连接。普通请求的 `seq = 0` 同样直接关闭连接，且不发送任何 `ErrorResp`；只有携带非零 `seq` 的、帧结构有效但业务请求无效的请求，才返回带该帧 `seq` 的 `ErrorResp`。
 
 ## 7. 原子迁移顺序
 
@@ -144,6 +152,7 @@ Push(msgID uint16, payload proto.Message)
 - Body 解析失败：移除 pending，并以解析错误调用失败回调。
 - 断线或销毁：一次性失败并清空全部 pending。
 - 取消请求：移除指定 pending；迟到响应按未知 `seq` 丢弃。
+- 业务重试：协调器先取消旧 `seq` 的 transport pending，再以同一 `run_id` 发起新 `seq`；旧尝试的成功响应和 `ErrorResp` 都不得完成或失败新尝试。
 - 乱序响应：只按 `seq` 关联，不依赖 MsgID 到达顺序。
 - 相同 MsgID 并发请求：使用不同 `seq` 独立完成。
 
@@ -155,6 +164,7 @@ Push(msgID uint16, payload proto.Message)
 - 重新生成并验证工作树无生成漂移。
 - 双端黄金帧测试必须得到完全相同的 15 字节。
 - 验证 `Length`、最大帧、半包、粘包、非法长度和非法 Body。
+- 双端协议/联调测试必须发送普通请求 `seq = 0`，断言服务端关闭连接且不发送 `seq = 0` 的 `ErrorResp`；客户端只将服务端入站 `seq = 0` 作为推送分发，绝不把该违规请求的错误响应当作推送。
 
 客户端网络测试：
 
@@ -162,6 +172,8 @@ Push(msgID uint16, payload proto.Message)
 - 乱序响应、相同 MsgID 并发、`ErrorResp`、错误 MsgID。
 - malformed Body、未知/重复 `seq`、断线、取消、销毁。
 - `seq = 0` 推送不进入 pending。
+- `Request` 先编码、再分配并注册 pending、最后发送；快速响应不能早于 pending 被处理。编码失败保持 `out seq = 0` 且无 pending；同步发送失败无 pending 泄漏、失败回调恰好一次、返回 `false` 且保留已分配的 `out seq`；发送成功返回 `true`。
+- 业务重试先 `CancelRequest(oldSeq)`，保持同一 `run_id` 且使用新 `seq`；旧尝试的成功响应和旧 `ErrorResp` 迟到时均按未知 `seq` 丢弃，不影响新尝试。
 
 服务端验证：
 
@@ -169,6 +181,7 @@ Push(msgID uint16, payload proto.Message)
 - `go vet ./...`
 - `go build ./...`
 - 协议验证器使用 10 字节帧头。
+- 服务端协议测试覆盖普通请求 `seq = 0`：直接关闭连接、无 `ErrorResp`、无将其降级为推送的路径。
 - devprobe 证明登录、存档、战斗结算和重复结算流程。
 
 Unity 全量验证：
