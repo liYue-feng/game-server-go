@@ -152,7 +152,7 @@ powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1
 powershell.exe -NoProfile -File tools/protobuf/Verify-Protocol.ps1 -ClientRoot ..\game-client-unity
 ```
 
-生成脚本固定使用 `protoc 35.0`、`protoc-gen-go v1.36.11` 和 `Google.Protobuf 3.35.1`，并在使用缓存工具或 NuGet 包前校验 SHA256。
+服务端本地生成器仅固定并校验 `protoc 35.0` 与 `protoc-gen-go v1.36.11`，且只写 Go 产物。`Google.Protobuf 3.35.1` 及其 NuGet 输入校验属于 Unity 客户端本地生成器和跨仓工具链职责；服务端生成器不下载或校验该包。
 
 ### 内存开发服与真实客户端联调
 
