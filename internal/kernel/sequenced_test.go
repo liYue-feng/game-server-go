@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"testing"
 
@@ -15,6 +16,22 @@ type seqConn struct {
 	seq                   uint32
 	replyCount, pushCount int
 	msgID                 uint16
+}
+
+func TestMalformedBodyErrorEchoesRequestSeq(t *testing.T) {
+	conn := &seqConn{}
+	ctx := session.WithSession(context.Background(), session.New(conn))
+	frame := make([]byte, protocol.HeaderSize+1)
+	binary.LittleEndian.PutUint32(frame[:4], uint32(len(frame)))
+	binary.LittleEndian.PutUint16(frame[4:6], protocol.MsgID_HeartbeatReq)
+	binary.LittleEndian.PutUint32(frame[6:10], 73)
+	frame[10] = 0xff
+	if err := New(nil).Dispatch(ctx, frame); err != nil {
+		t.Fatal(err)
+	}
+	if conn.replyCount != 1 || conn.seq != 73 || conn.msgID != protocol.MsgID_Error {
+		t.Fatalf("reply count=%d seq=%d msg=%d", conn.replyCount, conn.seq, conn.msgID)
+	}
 }
 
 func (c *seqConn) Reply(seq uint32, id uint16, _ proto.Message) error {

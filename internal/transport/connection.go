@@ -132,7 +132,9 @@ func (c *Connection) stop() {
 	c.closed = true
 	close(c.done)
 	c.mu.Unlock()
-	_ = c.conn.Close()
+	if c.conn != nil {
+		_ = c.conn.Close()
+	}
 }
 
 func (c *Connection) run() {

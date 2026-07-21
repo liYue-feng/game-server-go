@@ -12,13 +12,18 @@ import (
 	"game-server/internal/transport"
 
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
 )
 
 type Handler struct {
 	mysql     *store.MySQLStore
 	redis     *store.RedisStore
-	hub       *transport.Hub
+	hub       Broadcaster
 	adminUIDs map[int64]bool
+}
+type Broadcaster interface {
+	Broadcast(uint16, proto.Message)
+	OnlineCount() int
 }
 
 func NewHandler(mysql *store.MySQLStore, redis *store.RedisStore, hub *transport.Hub, adminUIDs []int64) *Handler {
