@@ -24,9 +24,27 @@ function Test-ContainsStaleTransportDescription([string]$Content) {
 }
 
 function Test-ComposeKeepsPaymentPortDisabled([string]$Content) {
-    foreach ($line in [regex]::Split($Content, '\r?\n')) {
-        $candidate = ($line -replace '\s+#.*$', '').Trim()
-        if ($candidate -match '(?i)\btarget\s*:\s*["'']?8081["'']?(?:\s*[,}]|\s*$)') {
+    $sectionIndent = -1
+    foreach ($rawLine in [regex]::Split($Content, '\r?\n')) {
+        $line = $rawLine -replace '\s+#.*$', ''
+        if ([string]::IsNullOrWhiteSpace($line)) {
+            continue
+        }
+
+        $indent = $line.Length - $line.TrimStart().Length
+        $candidate = $line.Trim()
+        if ($sectionIndent -ge 0 -and $indent -le $sectionIndent) {
+            $sectionIndent = -1
+        }
+        if ($candidate -match '^(?:ports|expose)\s*:\s*$') {
+            $sectionIndent = $indent
+            continue
+        }
+        if ($sectionIndent -lt 0) {
+            continue
+        }
+
+        if ($candidate -match '(?i)\b(?:target|published)\s*:\s*["'']?8081["'']?(?:\s*[,}]|\s*$)') {
             return $false
         }
         if (-not $candidate.StartsWith('-')) {
@@ -34,7 +52,7 @@ function Test-ComposeKeepsPaymentPortDisabled([string]$Content) {
         }
 
         $value = $candidate.Substring(1).Trim().Trim([char]0x22, [char]0x27)
-        if ($value -match '(?i)(?:^|:)8081(?:/(?:tcp|udp))?$') {
+        if ($value -match '(?i)(?:^|:)8081(?::|/(?:tcp|udp)|$)') {
             return $false
         }
     }
@@ -42,14 +60,46 @@ function Test-ComposeKeepsPaymentPortDisabled([string]$Content) {
     return $true
 }
 
-function Test-ContainsActivePaymentClaim([string]$Content) {
+function Test-PaymentClauseHasActiveClaim([string]$Clause) {
     $activePatterns = @(
-        '(?im)(?<!\u4E0D)(?:\u63A5\u53D7|\u5904\u7406|\u542F\u7528|\u542F\u52A8|\u63D0\u4F9B)[^\r\n]{0,16}\u652F\u4ED8\u56DE\u8C03',
-        '(?im)(?<!\u4E0D)(?:\u76D1\u542C|\u66B4\u9732|\u53D1\u5E03)[^\r\n]{0,16}(?:\u7AEF\u53E3\s*)?8081',
-        '(?im)\u652F\u4ED8(?:\u6210\u529F|\u5B8C\u6210|\u56DE\u8C03)[^\r\n]{0,24}(?<!\u4E0D)(?:\u53D1\u653E|\u53D1\u8D27|\u6388\u4E88)'
+        '(?:\u63A5\u53D7|\u5904\u7406|\u542F\u7528|\u542F\u52A8|\u63D0\u4F9B)[^\r\n]{0,16}\u652F\u4ED8\u56DE\u8C03',
+        '(?:\u76D1\u542C|\u66B4\u9732|\u53D1\u5E03)[^\r\n]{0,16}(?:\u7AEF\u53E3\s*)?8081',
+        '\u652F\u4ED8(?:\u6210\u529F|\u5B8C\u6210|\u56DE\u8C03)[^\r\n]{0,24}(?:\u53D1\u653E|\u53D1\u8D27|\u6388\u4E88)',
+        '(?i)\b(?:accepts?|process(?:es)?|handles?|enables?|starts?|provides?)\b[^\r\n]{0,32}\bpayment\s+callbacks?\b',
+        '(?i)\b(?:listens?|exposes?|publishes?)\b[^\r\n]{0,32}\b(?:port\s+)?8081\b',
+        '(?i)\b(?:successful|completed)\s+payments?\b[^\r\n]{0,32}\b(?:grants?|fulfills?|delivers?|awards?)\b',
+        '(?i)\bpayment\s+callback\s+listener\s+is\s+active\b'
     )
     foreach ($pattern in $activePatterns) {
-        if ($Content -match $pattern) {
+        if ($Clause -match $pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-PaymentClauseIsExplicitlyNegated([string]$Clause) {
+    $negativePatterns = @(
+        '(?:\u4E0D\u4F1A|\u4E0D\u518D|\u4E0D)(?:\u63A5\u53D7|\u5904\u7406|\u542F\u7528|\u542F\u52A8|\u63D0\u4F9B|\u76D1\u542C|\u66B4\u9732|\u53D1\u5E03|\u53D1\u653E|\u53D1\u8D27|\u6388\u4E88)',
+        '(?i)\b(?:does?|will)\s+not\b',
+        '(?i)\bno\s+(?:active\s+)?payment\b',
+        '(?i)\b(?:is|are|remains?)\s+disabled\b'
+    )
+    foreach ($pattern in $negativePatterns) {
+        if ($Clause -match $pattern) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-ContainsActivePaymentClaim([string]$Content) {
+    $clauses = [regex]::Split($Content, '(?i)[,;.\r\n\u3001\u3002\uFF0C\uFF1B]|\bbut\b|\u4F46')
+    foreach ($clause in $clauses) {
+        if ((Test-PaymentClauseHasActiveClaim -Clause $clause) -and
+            -not (Test-PaymentClauseIsExplicitlyNegated -Clause $clause)) {
             return $true
         }
     }
@@ -113,24 +163,48 @@ Describe 'Authoritative transport documentation' {
         }
     }
 
+    foreach ($case in @(
+        @{ Name = 'published payment host port'; Content = @('services:', '  game-server:', '    ports:', '      - 8081:8080') -join "`n" },
+        @{ Name = 'host IP published payment port'; Content = @('services:', '  game-server:', '    ports:', '      - 127.0.0.1:8081:8080') -join "`n" },
+        @{ Name = 'long syntax published payment port'; Content = @('services:', '  game-server:', '    ports:', '      - target: 8080', '        published: 8081') -join "`n" }
+    )) {
+        It "rejects the $($case.Name) Compose form" {
+            (Test-ComposeKeepsPaymentPortDisabled -Content $case.Content) | Should Be $false
+        }
+    }
+
     It 'allows an 8080-only Compose port list' {
         $fixture = @('services:', '  game-server:', '    ports:', '      - "8080:8080"') -join "`n"
+        (Test-ComposeKeepsPaymentPortDisabled -Content $fixture) | Should Be $true
+    }
+
+    It 'allows an unrelated environment value containing 8081' {
+        $fixture = @('services:', '  game-server:', '    environment:', '      - PAYMENT_PORT=8081') -join "`n"
         (Test-ComposeKeepsPaymentPortDisabled -Content $fixture) | Should Be $true
     }
 
     foreach ($case in @(
         @{ Name = 'active callback'; Content = [regex]::Unescape('\u670D\u52A1\u7AEF\u63A5\u53D7\u652F\u4ED8\u56DE\u8C03\u3002') },
         @{ Name = 'active listener'; Content = [regex]::Unescape('\u670D\u52A1\u7AEF\u76D1\u542C\u7AEF\u53E3 8081\u3002') },
-        @{ Name = 'active fulfillment'; Content = [regex]::Unescape('\u652F\u4ED8\u6210\u529F\u540E\u53D1\u653E\u5546\u54C1\u5E76\u63A8\u9001 PayResultNotify\u3002') }
+        @{ Name = 'active fulfillment'; Content = [regex]::Unescape('\u652F\u4ED8\u6210\u529F\u540E\u53D1\u653E\u5546\u54C1\u5E76\u63A8\u9001 PayResultNotify\u3002') },
+        @{ Name = 'English active callback'; Content = 'The server accepts payment callbacks.' },
+        @{ Name = 'English active listener'; Content = 'The server listens on port 8081 for payment callbacks.' },
+        @{ Name = 'English active fulfillment'; Content = 'Successful payments grant the purchased entitlement.' }
     )) {
         It "rejects the $($case.Name) README claim" {
             (Test-ContainsActivePaymentClaim -Content $case.Content) | Should Be $true
         }
     }
 
-    It 'allows explicit payment callback and fulfillment negation' {
-        $fixture = [regex]::Unescape('\u670D\u52A1\u7AEF\u4E0D\u63A5\u53D7\u652F\u4ED8\u56DE\u8C03\uFF0C\u4E5F\u4E0D\u76D1\u542C\u7AEF\u53E3 8081\uFF1B\u5F53\u524D\u4E0D\u521B\u5EFA\u3001\u4E0D\u66F4\u65B0\u3001\u4E0D\u53D1\u8D27\u3002')
-        (Test-ContainsActivePaymentClaim -Content $fixture) | Should Be $false
+    foreach ($case in @(
+        @{ Name = 'Chinese direct negation'; Content = [regex]::Unescape('\u670D\u52A1\u7AEF\u4E0D\u63A5\u53D7\u652F\u4ED8\u56DE\u8C03\uFF0C\u4E5F\u4E0D\u76D1\u542C\u7AEF\u53E3 8081\u3002') },
+        @{ Name = 'Chinese will-not negation'; Content = [regex]::Unescape('\u670D\u52A1\u7AEF\u4E0D\u4F1A\u63A5\u53D7\u652F\u4ED8\u56DE\u8C03\uFF0C\u4E5F\u4E0D\u4F1A\u76D1\u542C\u7AEF\u53E3 8081\u3002') },
+        @{ Name = 'Chinese no-longer negation'; Content = [regex]::Unescape('\u670D\u52A1\u7AEF\u4E0D\u518D\u5904\u7406\u652F\u4ED8\u56DE\u8C03\uFF0C\u4E5F\u4E0D\u518D\u76D1\u542C\u7AEF\u53E3 8081\u3002') },
+        @{ Name = 'English explicit negation'; Content = 'The server does not accept payment callbacks. Payment callbacks and fulfillment are disabled. No payment callback listener is active.' }
+    )) {
+        It "allows the $($case.Name) payment statement" {
+            (Test-ContainsActivePaymentClaim -Content $case.Content) | Should Be $false
+        }
     }
 
     It 'exposes only the game port in the production Dockerfile' {
