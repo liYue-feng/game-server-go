@@ -31,7 +31,7 @@ game_server_go/
 ├── cmd/server/          # 入口程序（生产/内存开发运行时）
 ├── cmd/devprobe/        # protobuf 真实连接探针
 ├── configs/             # 配置文件 (YAML)
-├── proto/game/v1/       # canonical messages.proto
+├── proto/game.proto     # canonical shared schema
 ├── internal/
 │   ├── config/          # 配置加载 (Viper)
 │   ├── session/         # 玩家会话
@@ -116,14 +116,14 @@ game_server_go/
 
 ## 当前 protobuf 战斗交付
 
-- `proto/game/v1/messages.proto` 是 32 个线上消息 ID 的唯一 schema；`internal/protocol/routes.go` 维护请求/响应映射，Go 产物位于 `internal/protocolpb/`。
+- `proto/game.proto` 是 32 个线上消息 ID 的共享 schema；`internal/protocol/routes.go` 维护请求/响应映射，Go 产物为 `internal/protocolpb/game.pb.go`。
 - 帧头继续使用 4 字节总长度 + 2 字节消息 ID（小端序），只有 Body 从 JSON 统一切换为 protobuf。
 - `archives.data` 保存 typed `PlayerArchive` protobuf 字节；`combat_settlements` 以 `(player_id, run_id)` 唯一键保存首次 `CombatResultResp` 快照，重复请求只返回同一奖励结果。
 - `CombatResultReq/Resp` 使用 4001/4002，响应回传 `run_id`；胜利才推进最高通关副本，胜负都会按配置结算金币、经验和局数。
 - `configs/config.dev.yaml` 提供不依赖 MySQL/Redis/微信服务的内存开发服，`cmd/devprobe` 验证 protobuf 登录、typed 存档往返和重复结算。
 
 ```powershell
-powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1 -ClientRoot ..\game-client-unity
+powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1
 powershell.exe -NoProfile -File tools/protobuf/Verify-Protocol.ps1 -ClientRoot ..\game-client-unity
 
 # 在配套 Unity 仓库执行，必须得到 3/3：存档往返、胜利持久化、失败结算

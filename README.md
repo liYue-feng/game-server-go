@@ -142,13 +142,13 @@ make clean    # 清理
 
 ### protobuf 协议生成与校验
 
-`proto/game/v1/messages.proto` 是 32 个线上消息 ID 的唯一协议定义。Go 代码生成到 `internal/protocolpb/messages.pb.go`，Unity C# 代码生成到客户端的 `tools/protobuf/generated/Messages.cs`。
+`proto/game.proto` 是 32 个线上消息 ID 的共享协议定义。后端仅在本仓生成 `internal/protocolpb/game.pb.go`，Unity 客户端在自己的仓库生成 C# 代码。
 
 ```powershell
-# 在后端仓库执行；ClientRoot 指向配套 Unity 工作区
-powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1 -ClientRoot ..\game-client-unity
+# 在后端仓库生成本地 Go 代码；ClientRoot 仅用于校验配套 Unity schema
+powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1
 
-# 校验 schema、固定工具版本和 Go/C# 已提交产物没有漂移
+# 校验 schema、固定工具版本和后端 Go 已提交产物没有漂移
 powershell.exe -NoProfile -File tools/protobuf/Verify-Protocol.ps1 -ClientRoot ..\game-client-unity
 ```
 
@@ -177,7 +177,7 @@ game_server_go/
 ├── cmd/server/main.go          # 入口程序（生产/内存开发运行时）
 ├── cmd/devprobe/main.go        # protobuf 开发服真实连接探针
 ├── configs/config.yaml         # 配置文件
-├── proto/game/v1/messages.proto # 线上协议唯一 schema
+├── proto/game.proto             # 与 Unity 仓库字节一致的共享 schema
 ├── internal/
 │   ├── config/                 # 配置加载 (Viper)
 │   ├── protocol/               # 通信协议

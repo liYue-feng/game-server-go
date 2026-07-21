@@ -31,7 +31,7 @@ make fmt
 cmd/server/          # Entry point (main.go)
 cmd/devprobe/        # Real WebSocket development probe
 configs/             # YAML configuration
-proto/game/v1/       # Canonical messages.proto schema
+proto/game.proto     # Canonical shared schema
 internal/
   config/            # Config loading (Viper)
   session/           # Player session (Bind/UID/Set/Get/Push) + ctx accessors
@@ -58,7 +58,7 @@ Binary framing with protobuf payload:
 - 2 bytes (uint16 LE): message ID
 - N bytes: protobuf-encoded body
 
-`proto/game/v1/messages.proto` is the canonical schema. `internal/protocol/routes.go` maps request/response prototypes, and `internal/protocolpb/messages.pb.go` is generated rather than hand-written.
+`proto/game.proto` is the canonical schema. `internal/protocol/routes.go` maps request/response prototypes, and `internal/protocolpb/game.pb.go` is generated rather than hand-written.
 
 Message ID ranges:
 - `1xxx`: Login module (1001=LoginReq, 1002=LoginResp, 1003=HeartbeatReq, 1004=HeartbeatResp)
@@ -106,8 +106,8 @@ Each module follows the same pattern:
 ```bash
 go test ./...
 
-# Generate Go and Unity protocol outputs, then verify committed outputs
-powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1 -ClientRoot ..\game-client-unity
+# Generate the local Go protocol output, then verify it and the sibling schema
+powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1
 powershell.exe -NoProfile -File tools/protobuf/Verify-Protocol.ps1 -ClientRoot ..\game-client-unity
 
 # Start dependency-free development backend and run its protobuf probe
