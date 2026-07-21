@@ -25,12 +25,6 @@
                                   │  │   MySQL (持久化) + Redis     │  │
                                   │  └──────────────────────────────┘  │
                                   └──────────────────────────────────────┘
-                                        ▲
-                                        │ HTTP POST (支付回调)
-                                  ┌─────┴──────┐
-                                  │  微信支付   │
-                                  │  服务器     │
-                                  └────────────┘
 ```
 
 ## 功能模块
@@ -41,7 +35,7 @@
 | Game | 存档保存/加载 | 2001-2099 |
 | Rank | 排行榜查询、分数提交 | 3001-3099 |
 | Combat | 战斗结算、敌人/副本/流派配置、玩家属性 | 4001-4099 |
-| Payment | 创建订单、支付回调 | 5001-5099 |
+| Payment | 协议 ID 保留，生产支付禁用 | 5001-5099 |
 | GM | 管理员指令（踢人、广播、查询） | 6001-6099 |
 
 ## 通信协议
@@ -49,13 +43,15 @@
 ### 帧格式
 
 ```
-+-------------------+-------------------+-------------------+
-| Length (4 bytes)  | MsgID  (2 bytes)  | Body   (N bytes)  |
-+-------------------+-------------------+-------------------+
-  小端序 uint32       小端序 uint16        protobuf 编码的消息体
++-------------------+-------------------+-------------------+-------------------+
+| Length (4 bytes)  | MsgID  (2 bytes)  | Seq    (4 bytes)  | Body   (N bytes)  |
++-------------------+-------------------+-------------------+-------------------+
+  小端序 uint32       小端序 uint16        小端序 uint32        protobuf 编码的消息体
 
-Length = 6 + len(Body)
+Length = 10 + len(Body)
 ```
+
+Transport contract: 10-byte little-endian [Length uint32][MsgID uint16][Seq uint32]; Length includes the 10-byte header; request seq is nonzero; responses and errors echo the exact request seq; pushes use seq 0; Body is protobuf binary.
 
 ### 消息ID分配
 
@@ -64,10 +60,12 @@ Length = 6 + len(Body)
 2xxx  存档模块   2001=保存请求  2002=保存响应  2003=加载请求  2004=加载响应
 3xxx  排行模块   3001=排行请求  3002=排行响应  3003=提交分数  3004=提交响应
 4xxx  战斗模块   4001=战斗结算请求  4002=战斗结算响应  4003-4014=配置/流派/属性
-5xxx  支付模块   5001=创建订单  5002=订单响应  5003=支付结果通知
+5xxx  支付保留   5001=创建订单  5002=订单响应  5003=支付结果通知（生产禁用）
 6xxx  GM模块     6001=GM指令    6002=GM响应
 9xxx  系统消息   9999=通用错误
 ```
+
+Payment protocol IDs 5001-5003 are reserved; production payment is disabled. `CreateOrderReq` 当前通过关联错误响应返回 `60001 payment is disabled`，服务端不接受支付回调，也不监听端口 `8081`。
 
 ### 示例：登录流程
 
@@ -210,9 +208,8 @@ game_server_go/
 │   │   └── service.go          #   run_id 结算服务
 │   ├── rank/                   # 排行榜模块
 │   │   └── handler.go          #   排行查询 + 分数提交
-│   ├── payment/                # 支付模块
-│   │   ├── handler.go          #   订单创建 + 回调处理
-│   │   └── constants.go        #   订单状态常量
+│   ├── payment/                # 禁用的支付协议边界
+│   │   └── handler.go          #   创建订单请求返回稳定业务错误
 │   ├── gm/                     # GM指令模块
 │   │   └── handler.go          #   踢人/广播/查询
 │   ├── model/                  # 数据模型 (GORM)
@@ -258,7 +255,7 @@ GAME_REDIS_HOST=10.0.0.1
 | players | 玩家账号（openid、昵称、token、最高分） |
 | archives | 游戏存档（`PlayerArchive` protobuf 字节，一个玩家一条） |
 | score_records | 分数记录（每局一条，用于数据分析） |
-| payment_orders | 支付订单（全生命周期：待支付→已支付→已发货） |
+| payment_orders | 休眠的历史支付订单模型；当前不创建、不更新、不发货 |
 | combat_settlements | 战斗结算响应快照，唯一键 `(player_id, run_id)` 防止重复发奖 |
 
 ### Redis 用途
@@ -284,7 +281,7 @@ GAME_REDIS_HOST=10.0.0.1
 ## 开发路线
 
 - [x] Phase 1: 项目骨架 — 目录结构、网关、消息路由、配置
-- [x] Phase 2: 核心业务 — 登录、存档、排行榜、支付、GM
+- [x] Phase 2: 核心业务 — 登录、存档、排行榜、GM，以及保留但禁用的支付协议边界
 - [x] Phase 2.5: 参考 pitaya 重构网络层 — kernel（注册/反射分发）+ session（玩家会话）+ pipeline（Before/After 钩子）+ transport（WebSocket 收发），线上协议帧不变、客户端零改动
 - [ ] Phase 3: 生产加固
   - [ ] 单元测试覆盖

@@ -20,7 +20,6 @@ services:
     build: .
     ports:
       - "8080:8080"  # WebSocket 游戏服务
-      - "8081:8081"  # HTTP 回调服务
     environment:
       # 通过环境变量覆盖配置（GAME_ 前缀）
       - GAME_MYSQL_HOST=mysql

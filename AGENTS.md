@@ -4,7 +4,7 @@ This document contains build, test, and code style guidelines for the Go game se
 
 ## Project Overview
 
-A Go-based game server for "Vampire Survivors" style WeChat mini-games. Uses a modular monolith architecture. The network layer uses a pitaya-inspired core (kernel + session + pipeline + transport), retains the 6-byte binary envelope, and serializes every body with generated protobuf types. Business modules cover login, typed archives, ranking, combat settlement/configuration, payment, and GM.
+A Go-based game server for "Vampire Survivors" style WeChat mini-games. Uses a modular monolith architecture. The network layer uses a pitaya-inspired core (kernel + session + pipeline + transport), uses a sequenced 10-byte binary envelope, and serializes every body with generated protobuf types. Business modules cover login, typed archives, ranking, combat settlement/configuration, the disabled payment boundary, and GM.
 
 ## Build & Run
 
@@ -54,9 +54,12 @@ tools/protobuf/      # Pinned generation and generated-output drift checks
 ## Protocol
 
 Binary framing with protobuf payload:
-- 4 bytes (uint32 LE): total frame length (including self)
+- 4 bytes (uint32 LE): total frame length, including the 10-byte header
 - 2 bytes (uint16 LE): message ID
+- 4 bytes (uint32 LE): request/response sequence
 - N bytes: protobuf-encoded body
+
+Transport contract: 10-byte little-endian [Length uint32][MsgID uint16][Seq uint32]; Length includes the 10-byte header; request seq is nonzero; responses and errors echo the exact request seq; pushes use seq 0; Body is protobuf binary.
 
 `proto/game.proto` is the canonical schema. `internal/protocol/routes.go` maps request/response prototypes, and `internal/protocolpb/game.pb.go` is generated rather than hand-written.
 
@@ -65,7 +68,7 @@ Message ID ranges:
 - `2xxx`: Game archive module (2001=SaveArchiveReq, 2002=SaveArchiveResp, 2003=LoadArchiveReq, 2004=LoadArchiveResp)
 - `3xxx`: Ranking module (3001=GetRankReq, 3002=GetRankResp, 3003=SubmitScoreReq, 3004=SubmitScoreResp)
 - `4xxx`: Combat module (4001=CombatResultReq, 4002=CombatResultResp, 4003-4014=config/style/stats)
-- `5xxx`: Payment module (5001-5003)
+- `5xxx`: Reserved payment IDs (5001-5003); production payment is disabled
 - `6xxx`: GM module (6001-6002)
 - `9xxx`: System messages (9999=Error)
 

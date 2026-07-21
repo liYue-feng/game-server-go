@@ -13,7 +13,7 @@ Go 语言游戏服务器，面向"吸血鬼幸存者"类微信小游戏。
 - **日志**: uber-go/zap + lumberjack
 - **缓存**: go-redis/redis/v8
 - **数据库**: gorm.io/gorm + MySQL
-- **协议**: 二进制帧头(4B长度+2B消息ID) + protobuf载荷
+- **协议**: 10 字节小端帧头（4B 长度 + 2B 消息 ID + 4B seq）+ protobuf 二进制载荷
 
 ## 核心原则
 
@@ -54,13 +54,15 @@ game_server_go/
 ## 协议格式
 
 ```
-+-------------------+-------------------+-------------------+
-| Length (4 bytes)  | MsgID  (2 bytes)  | Body   (N bytes)  |
-+-------------------+-------------------+-------------------+
-小端序 uint32        小端序 uint16        protobuf 编码的消息体
++-------------------+-------------------+-------------------+-------------------+
+| Length (4 bytes)  | MsgID  (2 bytes)  | Seq    (4 bytes)  | Body   (N bytes)  |
++-------------------+-------------------+-------------------+-------------------+
+小端序 uint32        小端序 uint16        小端序 uint32        protobuf 编码的消息体
 ```
 
-消息ID分段：1xxx=登录, 2xxx=存档, 3xxx=排行榜, 4xxx=战斗, 5xxx=支付, 6xxx=GM, 9xxx=系统
+Transport contract: 10-byte little-endian [Length uint32][MsgID uint16][Seq uint32]; Length includes the 10-byte header; request seq is nonzero; responses and errors echo the exact request seq; pushes use seq 0; Body is protobuf binary.
+
+消息ID分段：1xxx=登录, 2xxx=存档, 3xxx=排行榜, 4xxx=战斗, 5xxx=支付保留（生产禁用）, 6xxx=GM, 9xxx=系统
 
 ## 编码规范
 
@@ -117,10 +119,11 @@ game_server_go/
 ## 当前 protobuf 战斗交付
 
 - `proto/game.proto` 是 32 个线上消息 ID 的共享 schema；`internal/protocol/routes.go` 维护请求/响应映射，Go 产物为 `internal/protocolpb/game.pb.go`。
-- 帧头继续使用 4 字节总长度 + 2 字节消息 ID（小端序），只有 Body 从 JSON 统一切换为 protobuf。
+- 线上帧头为 10 字节小端格式，普通请求使用非零 seq，响应和错误原样回显请求 seq，服务端推送使用 seq 0；Body 统一为 protobuf 二进制。
 - `archives.data` 保存 typed `PlayerArchive` protobuf 字节；`combat_settlements` 以 `(player_id, run_id)` 唯一键保存首次 `CombatResultResp` 快照，重复请求只返回同一奖励结果。
 - `CombatResultReq/Resp` 使用 4001/4002，响应回传 `run_id`；胜利才推进最高通关副本，胜负都会按配置结算金币、经验和局数。
 - `configs/config.dev.yaml` 提供不依赖 MySQL/Redis/微信服务的内存开发服，`cmd/devprobe` 验证 protobuf 登录、typed 存档往返和重复结算。
+- 支付消息 ID 5001-5003 仅保留协议兼容；生产支付已禁用，创建订单返回关联到原请求 seq 的 `60001 payment is disabled`，服务端不监听 8081。
 
 ```powershell
 powershell.exe -NoProfile -File tools/protobuf/Generate-Protocol.ps1

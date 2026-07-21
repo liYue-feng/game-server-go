@@ -12,6 +12,29 @@ $explicitClientRoot = if ($isWorktree) { $null } else { Join-Path $projectParent
 $clientRoot = Resolve-PeerRepositoryRoot -CurrentRoot $projectRoot -ExplicitPeerRoot $explicitClientRoot `
     -PeerRepositoryName 'game-client-unity' -PeerDescription 'client'
 
+$transportContract = 'Transport contract: 10-byte little-endian [Length uint32][MsgID uint16][Seq uint32]; Length includes the 10-byte header; request seq is nonzero; responses and errors echo the exact request seq; pushes use seq 0; Body is protobuf binary.'
+
+Describe 'Authoritative transport documentation' {
+    foreach ($relativePath in @('AGENTS.md', 'CLAUDE.md', 'README.md', 'internal/transport/connection.go')) {
+        It "documents the sequenced protobuf frame in $relativePath" {
+            $content = [IO.File]::ReadAllText((Join-Path $projectRoot $relativePath))
+            $content | Should Match ([regex]::Escape($transportContract))
+            $content | Should Not Match '(?i)6[- ]byte|six[- ]byte|6\s*字节|六字节|Length\s*=\s*6\s*\+|4B长度\s*\+\s*2B'
+            $content | Should Not Match '(?im)^(?=.*Length)(?=.*MsgID)(?!.*Seq).*$'
+        }
+    }
+
+    It 'marks payment protocol IDs as reserved while production payment is disabled' {
+        $readme = [IO.File]::ReadAllText((Join-Path $projectRoot 'README.md'))
+        $readme | Should Match 'Payment protocol IDs 5001-5003 are reserved; production payment is disabled\.'
+    }
+
+    It 'does not publish the disabled payment callback port' {
+        $compose = [IO.File]::ReadAllText((Join-Path $projectRoot 'docker-compose.yml'))
+        $compose | Should Not Match '(?m)^\s*-\s*["'']?8081:8081'
+    }
+}
+
 Describe 'Canonical schema ownership' {
     It 'owns one local game.proto and rejects the old source names' {
         $legacySchema = Join-Path $projectRoot ('proto\game\v1\' + 'messages' + '.proto')

@@ -25,13 +25,15 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// Transport contract: 10-byte little-endian [Length uint32][MsgID uint16][Seq uint32]; Length includes the 10-byte header; request seq is nonzero; responses and errors echo the exact request seq; pushes use seq 0; Body is protobuf binary.
+
 var (
 	ErrConnectionClosed = errors.New("transport connection closed")
 	errSendBufferFull   = errors.New("transport send buffer full")
 )
 
 const (
-	// WebSocket 单条消息上限为 4 MiB，包含完整应用层协议帧（6 字节帧头和消息体）。
+	// WebSocket 单条消息上限为 4 MiB，包含完整应用层协议帧（10 字节帧头和消息体）。
 	maxWebSocketMessageSize int64 = 4 * 1024 * 1024
 	// 写超时：发送消息到客户端的最大等待时间
 	writeWait = 10 * time.Second
