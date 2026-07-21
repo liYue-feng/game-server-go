@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	HeaderSize   = 6
+	HeaderSize   = 10
 	MaxFrameSize = 64 * 1024
 )
 
@@ -20,12 +20,12 @@ var (
 
 type Message struct {
 	MsgID uint16
+	Seq   uint32
 	Body  []byte
 }
 
-// Encode retains the protocol's 6-byte little-endian envelope and serializes
-// the payload exclusively with the generated protobuf schema.
-func Encode(msgID uint16, payload proto.Message) ([]byte, error) {
+// Encode serializes a protobuf payload into the sequenced little-endian envelope.
+func Encode(msgID uint16, seq uint32, payload proto.Message) ([]byte, error) {
 	if payload == nil {
 		return nil, errors.New("protobuf payload is nil")
 	}
@@ -40,6 +40,7 @@ func Encode(msgID uint16, payload proto.Message) ([]byte, error) {
 	frame := make([]byte, totalLen)
 	binary.LittleEndian.PutUint32(frame[:4], uint32(totalLen))
 	binary.LittleEndian.PutUint16(frame[4:6], msgID)
+	binary.LittleEndian.PutUint32(frame[6:10], seq)
 	copy(frame[HeaderSize:], body)
 	return frame, nil
 }
@@ -57,5 +58,9 @@ func Decode(data []byte) (*Message, error) {
 	}
 	body := make([]byte, len(data)-HeaderSize)
 	copy(body, data[HeaderSize:])
-	return &Message{MsgID: binary.LittleEndian.Uint16(data[4:6]), Body: body}, nil
+	return &Message{
+		MsgID: binary.LittleEndian.Uint16(data[4:6]),
+		Seq:   binary.LittleEndian.Uint32(data[6:10]),
+		Body:  body,
+	}, nil
 }

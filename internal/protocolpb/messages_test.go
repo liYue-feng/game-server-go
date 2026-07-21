@@ -17,11 +17,12 @@ func TestLoginReqGoldenWireFrame(t *testing.T) {
 		t.Fatalf("body = %s, want 0a03616263", got)
 	}
 
-	frame := make([]byte, 6+len(body))
+	frame := make([]byte, 10+len(body))
 	binary.LittleEndian.PutUint32(frame[:4], uint32(len(frame)))
 	binary.LittleEndian.PutUint16(frame[4:6], uint16(MessageId_MESSAGE_ID_LOGIN_REQ))
-	copy(frame[6:], body)
-	if got := hex.EncodeToString(frame); got != "0b000000e9030a03616263" {
-		t.Fatalf("frame = %s, want 0b000000e9030a03616263", got)
+	binary.LittleEndian.PutUint32(frame[6:10], 1)
+	copy(frame[10:], body)
+	if got := hex.EncodeToString(frame); got != "0f000000e903010000000a03616263" {
+		t.Fatalf("frame = %s, want 0f000000e903010000000a03616263", got)
 	}
 }
