@@ -22,7 +22,8 @@ import (
 type Conn interface {
 	// SendMessage 把 payload 按 msgID 编码为协议帧并发送给客户端。
 	// 线程安全由实现方保证（生产实现走 send channel + writePump）。
-	SendMessage(msgID uint16, payload proto.Message) error
+	Reply(seq uint32, msgID uint16, payload proto.Message) error
+	Push(msgID uint16, payload proto.Message) error
 }
 
 // Session 玩家会话。
@@ -93,7 +94,11 @@ func (s *Session) GetString(key string) string {
 // Push 服务器主动向客户端推送一帧消息。
 // 对齐 pitaya 的 session.Push：用于支付结果通知、广播等场景。
 func (s *Session) Push(msgID uint16, payload proto.Message) error {
-	return s.conn.SendMessage(msgID, payload)
+	return s.conn.Push(msgID, payload)
+}
+
+func (s *Session) Reply(seq uint32, msgID uint16, payload proto.Message) error {
+	return s.conn.Reply(seq, msgID, payload)
 }
 
 // OnClose 注册连接关闭时的回调。

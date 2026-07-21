@@ -83,8 +83,16 @@ func (c *Connection) Session() *session.Session {
 // 线程安全：真正写 WebSocket 的动作由 writePump goroutine 完成。
 // 非阻塞投递：缓冲区满说明客户端处理不过来，丢弃该消息而非阻塞，
 // 否则会拖垮服务器 goroutine。
-func (c *Connection) SendMessage(msgID uint16, payload proto.Message) error {
-	data, err := protocol.Encode(msgID, payload)
+func (c *Connection) Reply(seq uint32, msgID uint16, payload proto.Message) error {
+	return c.sendMessage(seq, msgID, payload)
+}
+
+func (c *Connection) Push(msgID uint16, payload proto.Message) error {
+	return c.sendMessage(0, msgID, payload)
+}
+
+func (c *Connection) sendMessage(seq uint32, msgID uint16, payload proto.Message) error {
+	data, err := protocol.Encode(msgID, seq, payload)
 	if err != nil {
 		return err
 	}
@@ -174,7 +182,9 @@ func (c *Connection) readPump() {
 			continue
 		}
 		// 交给内核：解码 -> 认证/限流 -> 分发 -> 编码响应。
-		c.kernel.Dispatch(ctx, data)
+		if err := c.kernel.Dispatch(ctx, data); errors.Is(err, kernel.ErrFatalProtocol) {
+			break
+		}
 	}
 }
 

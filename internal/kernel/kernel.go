@@ -2,6 +2,8 @@ package kernel
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"reflect"
 
 	"game-server/internal/pipeline"
@@ -12,6 +14,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 )
+
+var ErrFatalProtocol = errors.New("fatal protocol violation")
 
 type handlerEntry struct {
 	respID   uint16
@@ -82,28 +86,30 @@ func (k *Kernel) IsAuthFree(msgID uint16) bool {
 }
 func (k *Kernel) HasHandler(msgID uint16) bool { _, ok := k.handlers[msgID]; return ok }
 
-func (k *Kernel) Dispatch(ctx context.Context, data []byte) {
+func (k *Kernel) Dispatch(ctx context.Context, data []byte) error {
 	sess := session.FromContext(ctx)
 	frame, err := protocol.Decode(data)
 	if err != nil {
-		k.sendError(sess, protocol.NewBizError(protocol.ErrInvalidParam, "invalid message frame"))
-		return
+		return fmt.Errorf("%w: %v", ErrFatalProtocol, err)
+	}
+	if frame.Seq == 0 {
+		return ErrFatalProtocol
 	}
 	entry, ok := k.handlers[frame.MsgID]
 	if !ok {
-		k.sendError(sess, protocol.NewBizError(protocol.ErrInvalidParam, "unsupported message type"))
-		return
+		k.sendError(sess, frame.Seq, protocol.NewBizError(protocol.ErrInvalidParam, "unsupported message type"))
+		return nil
 	}
 	req, ok := reflect.New(entry.reqType).Interface().(proto.Message)
 	if !ok || proto.Unmarshal(frame.Body, req) != nil {
-		k.sendError(sess, protocol.NewBizError(protocol.ErrInvalidParam, "invalid request payload"))
-		return
+		k.sendError(sess, frame.Seq, protocol.NewBizError(protocol.ErrInvalidParam, "invalid request payload"))
+		return nil
 	}
 	ctx = withMsgID(ctx, frame.MsgID)
 	ctx, _, err = k.hooks.ExecuteBefore(ctx, req)
 	if err != nil {
-		k.finish(sess, entry, nil, err)
-		return
+		k.finish(sess, frame.Seq, entry, nil, err)
+		return nil
 	}
 	result := entry.fn.Call([]reflect.Value{reflect.ValueOf(ctx), reflect.ValueOf(req)})
 	var response interface{}
@@ -115,12 +121,13 @@ func (k *Kernel) Dispatch(ctx context.Context, data []byte) {
 		handlerErr, _ = result[1].Interface().(error)
 	}
 	response, handlerErr = k.hooks.ExecuteAfter(ctx, response, handlerErr)
-	k.finish(sess, entry, response, handlerErr)
+	k.finish(sess, frame.Seq, entry, response, handlerErr)
+	return nil
 }
 
-func (k *Kernel) finish(sess *session.Session, entry *handlerEntry, response interface{}, err error) {
+func (k *Kernel) finish(sess *session.Session, seq uint32, entry *handlerEntry, response interface{}, err error) {
 	if err != nil {
-		k.sendError(sess, err)
+		k.sendError(sess, seq, err)
 		return
 	}
 	if response == nil || sess == nil {
@@ -128,15 +135,15 @@ func (k *Kernel) finish(sess *session.Session, entry *handlerEntry, response int
 	}
 	message, ok := response.(proto.Message)
 	if !ok {
-		k.sendError(sess, protocol.NewBizError(protocol.ErrInternal, "invalid handler response"))
+		k.sendError(sess, seq, protocol.NewBizError(protocol.ErrInternal, "invalid handler response"))
 		return
 	}
-	if err := sess.Push(entry.respID, message); err != nil {
+	if err := sess.Reply(seq, entry.respID, message); err != nil {
 		zap.L().Error("send websocket response", zap.Uint16("message_id", entry.respID), zap.Error(err))
 	}
 }
 
-func (k *Kernel) sendError(sess *session.Session, err error) {
+func (k *Kernel) sendError(sess *session.Session, seq uint32, err error) {
 	if sess == nil {
 		return
 	}
@@ -146,7 +153,7 @@ func (k *Kernel) sendError(sess *session.Session, err error) {
 	} else {
 		zap.L().Error("kernel handler error", zap.Error(err))
 	}
-	if sendErr := sess.Push(protocol.MsgID_Error, &protocolpb.ErrorResp{Code: int32(code), Msg: message}); sendErr != nil {
+	if sendErr := sess.Reply(seq, protocol.MsgID_Error, &protocolpb.ErrorResp{Code: int32(code), Msg: message}); sendErr != nil {
 		zap.L().Error("send protobuf error response", zap.Error(sendErr))
 	}
 }

@@ -21,13 +21,17 @@ type captureConn struct {
 	frames [][]byte
 }
 
-func (c *captureConn) SendMessage(msgID uint16, payload proto.Message) error {
-	frame, err := protocol.Encode(msgID, payload)
+func (c *captureConn) Reply(seq uint32, msgID uint16, payload proto.Message) error {
+	frame, err := protocol.Encode(msgID, seq, payload)
 	if err != nil {
 		return err
 	}
 	c.frames = append(c.frames, frame)
 	return nil
+}
+
+func (c *captureConn) Push(msgID uint16, payload proto.Message) error {
+	return c.Reply(0, msgID, payload)
 }
 
 // newCtx 构造携带会话的 ctx（模拟 transport 层注入）。
@@ -51,7 +55,7 @@ func TestGoldenWireCompatibility(t *testing.T) {
 	ctx, _ := newCtx(conn)
 
 	// 构造客户端请求帧（与 Unity 发送格式一致）。
-	reqFrame, err := protocol.Encode(protocol.MsgID_LoginReq, &protocol.LoginReq{Code: "abc"})
+	reqFrame, err := protocol.Encode(protocol.MsgID_LoginReq, 1, &protocol.LoginReq{Code: "abc"})
 	if err != nil {
 		t.Fatalf("构造请求帧失败: %v", err)
 	}
@@ -62,7 +66,7 @@ func TestGoldenWireCompatibility(t *testing.T) {
 		t.Fatalf("应发送 1 帧响应, 实际 %d", len(conn.frames))
 	}
 	// 预期响应帧：用旧 Encode 生成的金标准字节。
-	want, _ := protocol.Encode(protocol.MsgID_LoginResp, &protocol.LoginResp{Uid: 1001, Nickname: "abc", Token: "tok"})
+	want, _ := protocol.Encode(protocol.MsgID_LoginResp, 1, &protocol.LoginResp{Uid: 1001, Nickname: "abc", Token: "tok"})
 	if !bytes.Equal(conn.frames[0], want) {
 		t.Fatalf("响应帧字节不匹配\n got=%v\nwant=%v", conn.frames[0], want)
 	}
@@ -78,10 +82,10 @@ func TestBizErrorEncoded(t *testing.T) {
 
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
-	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, &protocol.LoginReq{Code: "x"})
+	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, 1, &protocol.LoginReq{Code: "x"})
 	k.Dispatch(ctx, reqFrame)
 
-	want, _ := protocol.Encode(protocol.MsgID_Error, &protocol.ErrorResp{Code: int32(protocol.ErrLoginWechatFailed), Msg: "微信登录失败"})
+	want, _ := protocol.Encode(protocol.MsgID_Error, 1, &protocol.ErrorResp{Code: int32(protocol.ErrLoginWechatFailed), Msg: "微信登录失败"})
 	if len(conn.frames) != 1 || !bytes.Equal(conn.frames[0], want) {
 		t.Fatalf("BizError 未正确编码为错误帧")
 	}
@@ -96,10 +100,10 @@ func TestSystemErrorMasked(t *testing.T) {
 		})
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
-	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, &protocol.LoginReq{Code: "x"})
+	reqFrame, _ := protocol.Encode(protocol.MsgID_LoginReq, 1, &protocol.LoginReq{Code: "x"})
 	k.Dispatch(ctx, reqFrame)
 
-	want, _ := protocol.Encode(protocol.MsgID_Error, &protocol.ErrorResp{Code: int32(protocol.ErrInternal), Msg: "internal server error"})
+	want, _ := protocol.Encode(protocol.MsgID_Error, 1, &protocol.ErrorResp{Code: int32(protocol.ErrInternal), Msg: "internal server error"})
 	if len(conn.frames) != 1 || !bytes.Equal(conn.frames[0], want) {
 		t.Fatalf("系统 error 未归一为 ErrInternal")
 	}
@@ -111,7 +115,7 @@ func TestUnknownMsgID(t *testing.T) {
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
 	// 用一个未注册的 MsgID 构帧。
-	reqFrame, _ := protocol.Encode(uint16(59999), &protocol.HeartbeatReq{})
+	reqFrame, _ := protocol.Encode(uint16(59999), 1, &protocol.HeartbeatReq{})
 	k.Dispatch(ctx, reqFrame)
 	if len(conn.frames) != 1 {
 		t.Fatalf("未注册消息应回一帧错误, 实际 %d", len(conn.frames))
@@ -133,13 +137,13 @@ func TestBeforeHookBreak(t *testing.T) {
 		})
 	conn := &captureConn{}
 	ctx, _ := newCtx(conn)
-	reqFrame, _ := protocol.Encode(protocol.MsgID_SaveArchiveReq, &protocol.SaveArchiveReq{})
+	reqFrame, _ := protocol.Encode(protocol.MsgID_SaveArchiveReq, 1, &protocol.SaveArchiveReq{})
 	k.Dispatch(ctx, reqFrame)
 
 	if handlerCalled {
 		t.Fatal("前置钩子中断后 handler 不应执行")
 	}
-	want, _ := protocol.Encode(protocol.MsgID_Error, &protocol.ErrorResp{Code: int32(protocol.ErrUnauthorized), Msg: "请先登录"})
+	want, _ := protocol.Encode(protocol.MsgID_Error, 1, &protocol.ErrorResp{Code: int32(protocol.ErrUnauthorized), Msg: "请先登录"})
 	if len(conn.frames) != 1 || !bytes.Equal(conn.frames[0], want) {
 		t.Fatal("前置钩子错误未正确编码")
 	}

@@ -16,7 +16,15 @@ type fakeConn struct {
 	sendCount   int
 }
 
-func (f *fakeConn) SendMessage(msgID uint16, payload proto.Message) error {
+func (f *fakeConn) Reply(_ uint32, msgID uint16, payload proto.Message) error {
+	return f.record(msgID, payload)
+}
+
+func (f *fakeConn) Push(msgID uint16, payload proto.Message) error {
+	return f.record(msgID, payload)
+}
+
+func (f *fakeConn) record(msgID uint16, payload proto.Message) error {
 	f.lastMsgID = msgID
 	f.lastPayload = payload
 	f.sendCount++
