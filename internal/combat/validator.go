@@ -3,6 +3,7 @@ package combat
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"game-server/internal/protocolpb"
 )
@@ -45,12 +46,9 @@ func validateCombatResult(req *protocolpb.CombatResultReq, cfg *CombatConfig) er
 	}
 
 	// 存活时间边界检查
-	if req.DurationMs < 0 {
-		return errors.New("存活时间不能为负")
-	}
-	// 合理最长游戏时间：2小时（7200秒）
-	if req.DurationMs > 7200*1000 {
-		return fmt.Errorf("duration abnormal: %d", req.DurationMs)
+	if math.IsNaN(req.SurvivalTime) || math.IsInf(req.SurvivalTime, 0) ||
+		req.SurvivalTime < 0 || req.SurvivalTime > 7200 {
+		return fmt.Errorf("survival time abnormal: %g", req.SurvivalTime)
 	}
 
 	// 流派ID合法性检查

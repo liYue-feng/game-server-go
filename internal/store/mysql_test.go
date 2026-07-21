@@ -67,7 +67,9 @@ func TestMySQLSettlementDuplicateConflictRollsBackAndReturnsStoredSnapshot(t *te
 	mock.ExpectQuery("SELECT \\* FROM `player_stats`").
 		WithArgs(int64(21), 1).WillReturnRows(sqlmock.NewRows([]string{"id", "player_id"}))
 	mock.ExpectExec("INSERT INTO `player_stats`").WillReturnResult(sqlmock.NewResult(1, 1))
-	mock.ExpectExec("INSERT INTO `score_records`").WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("INSERT INTO `score_records`").
+		WithArgs(int64(21), int64(321), `{"kills":4,"survival_time":42.5,"dungeon_level":3,"style_id":3}`, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO `archives`").WillReturnResult(sqlmock.NewResult(1, 1))
 	mock.ExpectExec("INSERT INTO `combat_settlements`").WillReturnError(&drivermysql.MySQLError{Number: 1062, Message: "duplicate"})
 	mock.ExpectRollback()

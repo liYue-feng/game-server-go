@@ -73,11 +73,14 @@ func (r *MySQLCombatSettlementRepository) Settle(playerID int64, req *protocolpb
 		if err := updateSettlementStats(tx, playerID, req, response); err != nil {
 			return err
 		}
+		metadata, err := CombatScoreMetadataJSON(req)
+		if err != nil {
+			return err
+		}
 		if err := tx.Create(&model.ScoreRecord{
 			PlayerID: playerID,
 			Score:    req.Score,
-			Metadata: fmt.Sprintf(`{"kills":%d,"duration_ms":%d,"dungeon_level":%d,"style_id":%d}`,
-				req.Kills, req.DurationMs, req.DungeonLevel, req.StyleId),
+			Metadata: metadata,
 		}).Error; err != nil {
 			return err
 		}

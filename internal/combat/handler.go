@@ -10,7 +10,6 @@ package combat
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strconv"
 
 	"game-server/internal/protocol"
@@ -119,11 +118,14 @@ func (h *Handler) CombatResult(ctx context.Context, req *protocolpb.CombatResult
 	}
 
 	// 保存分数记录（历史查询用途）
+	metadata, err := store.CombatScoreMetadataJSON(req)
+	if err != nil {
+		return nil, protocol.NewBizError(protocol.ErrCombatInvalidResult, "invalid combat metadata")
+	}
 	scoreRecord := &store.ScoreRecord{
 		PlayerID: uid,
 		Score:    req.Score,
-		Metadata: fmt.Sprintf(`{"kills":%d,"duration_ms":%d,"dungeon_level":%d,"style_id":%d}`,
-			req.Kills, req.DurationMs, req.DungeonLevel, req.StyleId),
+		Metadata: metadata,
 	}
 	if err := h.mysql.CreateScoreRecord(scoreRecord); err != nil {
 		zap.L().Error("保存分数记录失败", zap.Int64("uid", uid), zap.Error(err))

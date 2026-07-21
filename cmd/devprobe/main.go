@@ -146,7 +146,7 @@ func newProbeCombatResult(runID string) *protocolpb.CombatResultReq {
 		DungeonLevel: 2,
 		Score:        100,
 		Kills:        2,
-		DurationMs:   1_000,
+		SurvivalTime: 1,
 		StyleId:      1,
 		Outcome:      protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY,
 		PlayerLevel:  1,

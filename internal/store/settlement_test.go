@@ -16,7 +16,7 @@ func settlementRequest(runID string, outcome protocolpb.BattleOutcome) *protocol
 		DungeonLevel: 3,
 		Score:        321,
 		Kills:        4,
-		DurationMs:   42_000,
+		SurvivalTime: 42.5,
 		StyleId:      3,
 		Outcome:      outcome,
 		PlayerLevel:  2,

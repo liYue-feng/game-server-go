@@ -2,6 +2,8 @@ package combat
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"strings"
 	"testing"
 
@@ -16,7 +18,7 @@ func validCombatResult() *protocolpb.CombatResultReq {
 		DungeonLevel: 2,
 		Score:        100,
 		Kills:        3,
-		DurationMs:   30_000,
+		SurvivalTime: 30,
 		StyleId:      1,
 		Outcome:      protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY,
 		PlayerLevel:  1,
@@ -72,8 +74,11 @@ func TestSettlementServiceRejectsInvalidCombatResult(t *testing.T) {
 		{name: "over max score", edit: func(req *protocolpb.CombatResultReq) { req.Score = 20_001 }},
 		{name: "negative kills", edit: func(req *protocolpb.CombatResultReq) { req.Kills = -1 }},
 		{name: "over max kills", edit: func(req *protocolpb.CombatResultReq) { req.Kills = 10_000 }},
-		{name: "negative duration", edit: func(req *protocolpb.CombatResultReq) { req.DurationMs = -1 }},
-		{name: "over max duration", edit: func(req *protocolpb.CombatResultReq) { req.DurationMs = 7_200_001 }},
+		{name: "negative survival time", edit: func(req *protocolpb.CombatResultReq) { req.SurvivalTime = -1 }},
+		{name: "over max survival time", edit: func(req *protocolpb.CombatResultReq) { req.SurvivalTime = 7_200.1 }},
+		{name: "NaN survival time", edit: func(req *protocolpb.CombatResultReq) { req.SurvivalTime = math.NaN() }},
+		{name: "positive infinite survival time", edit: func(req *protocolpb.CombatResultReq) { req.SurvivalTime = math.Inf(1) }},
+		{name: "negative infinite survival time", edit: func(req *protocolpb.CombatResultReq) { req.SurvivalTime = math.Inf(-1) }},
 		{name: "invalid dungeon", edit: func(req *protocolpb.CombatResultReq) { req.DungeonLevel = 0 }},
 		{name: "over max dungeon", edit: func(req *protocolpb.CombatResultReq) { req.DungeonLevel = 101 }},
 		{name: "invalid style", edit: func(req *protocolpb.CombatResultReq) { req.StyleId = 0 }},
@@ -86,6 +91,19 @@ func TestSettlementServiceRejectsInvalidCombatResult(t *testing.T) {
 			test.edit(req)
 			if _, err := service.Settle(7, req); err == nil {
 				t.Fatal("Settle() error = nil, want validation error")
+			}
+		})
+	}
+}
+
+func TestSettlementServiceAcceptsSurvivalTimeBoundariesAndFraction(t *testing.T) {
+	for _, survivalTime := range []float64{0, 12.5, 7200} {
+		t.Run(fmt.Sprintf("%g", survivalTime), func(t *testing.T) {
+			service := NewSettlementService(store.NewMemoryDevelopmentStoreWithSettlementPolicy(store.CombatRewardPolicy{GoldPerKill: 5, ExpPerKill: 10}), DefaultCombatConfig())
+			req := validCombatResult()
+			req.SurvivalTime = survivalTime
+			if _, err := service.Settle(7, req); err != nil {
+				t.Fatalf("Settle() error = %v, want survival_time=%g accepted", err, survivalTime)
 			}
 		})
 	}

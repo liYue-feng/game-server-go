@@ -110,7 +110,7 @@ message CombatResultReq {
   int32 dungeon_level = 2;
   int64 score = 3;
   int32 kills = 4;
-  int64 duration_ms = 5;
+  double survival_time = 5;
   int32 style_id = 6;
   BattleOutcome outcome = 7;
   int32 player_level = 8;

@@ -222,6 +222,12 @@ Describe 'Canonical schema ownership' {
         Test-Path -LiteralPath $clientSchema -PathType Leaf | Should Be $true
         (Get-RawSha256 -Path $serverSchema) | Should Be (Get-RawSha256 -Path $clientSchema)
     }
+
+    It 'defines CombatResultReq field 5 as double survival_time' {
+        $schema = [IO.File]::ReadAllText((Join-Path $projectRoot 'proto\game.proto'))
+        $schema | Should Match '(?m)^\s*double\s+survival_time\s*=\s*5\s*;'
+        $schema | Should Not Match '(?m)^\s*int64\s+duration_ms\s*=\s*5\s*;'
+    }
 }
 
 Describe 'Generate-Protocol toolchain cache verification' {

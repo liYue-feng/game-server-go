@@ -75,7 +75,7 @@ $schema = Get-Content -LiteralPath $schemaPath -Raw
     'message PlayerArchive {',
     'message ScoreMetadata {',
     'message CombatResultReq {',
-    'int64 duration_ms = 5;',
+    'double survival_time = 5;',
     'BattleOutcome outcome = 7;',
     'string run_id = 7;',
     'bytes args_json = 2;'

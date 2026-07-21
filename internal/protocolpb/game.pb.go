@@ -1059,7 +1059,7 @@ type CombatResultReq struct {
 	DungeonLevel  int32                  `protobuf:"varint,2,opt,name=dungeon_level,json=dungeonLevel,proto3" json:"dungeon_level,omitempty"`
 	Score         int64                  `protobuf:"varint,3,opt,name=score,proto3" json:"score,omitempty"`
 	Kills         int32                  `protobuf:"varint,4,opt,name=kills,proto3" json:"kills,omitempty"`
-	DurationMs    int64                  `protobuf:"varint,5,opt,name=duration_ms,json=durationMs,proto3" json:"duration_ms,omitempty"`
+	SurvivalTime  float64                `protobuf:"fixed64,5,opt,name=survival_time,json=survivalTime,proto3" json:"survival_time,omitempty"`
 	StyleId       int32                  `protobuf:"varint,6,opt,name=style_id,json=styleId,proto3" json:"style_id,omitempty"`
 	Outcome       BattleOutcome          `protobuf:"varint,7,opt,name=outcome,proto3,enum=game.protocol.v1.BattleOutcome" json:"outcome,omitempty"`
 	PlayerLevel   int32                  `protobuf:"varint,8,opt,name=player_level,json=playerLevel,proto3" json:"player_level,omitempty"`
@@ -1125,9 +1125,9 @@ func (x *CombatResultReq) GetKills() int32 {
 	return 0
 }
 
-func (x *CombatResultReq) GetDurationMs() int64 {
+func (x *CombatResultReq) GetSurvivalTime() float64 {
 	if x != nil {
-		return x.DurationMs
+		return x.SurvivalTime
 	}
 	return 0
 }
@@ -2622,14 +2622,13 @@ const file_game_proto_rawDesc = "" +
 	"\x0fSubmitScoreResp\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x1d\n" +
 	"\n" +
-	"best_score\x18\x02 \x01(\x03R\tbestScore\"\x93\x02\n" +
+	"best_score\x18\x02 \x01(\x03R\tbestScore\"\x97\x02\n" +
 	"\x0fCombatResultReq\x12\x15\n" +
 	"\x06run_id\x18\x01 \x01(\tR\x05runId\x12#\n" +
 	"\rdungeon_level\x18\x02 \x01(\x05R\fdungeonLevel\x12\x14\n" +
 	"\x05score\x18\x03 \x01(\x03R\x05score\x12\x14\n" +
-	"\x05kills\x18\x04 \x01(\x05R\x05kills\x12\x1f\n" +
-	"\vduration_ms\x18\x05 \x01(\x03R\n" +
-	"durationMs\x12\x19\n" +
+	"\x05kills\x18\x04 \x01(\x05R\x05kills\x12#\n" +
+	"\rsurvival_time\x18\x05 \x01(\x01R\fsurvivalTime\x12\x19\n" +
 	"\bstyle_id\x18\x06 \x01(\x05R\astyleId\x129\n" +
 	"\aoutcome\x18\a \x01(\x0e2\x1f.game.protocol.v1.BattleOutcomeR\aoutcome\x12!\n" +
 	"\fplayer_level\x18\b \x01(\x05R\vplayerLevel\"\xfb\x01\n" +

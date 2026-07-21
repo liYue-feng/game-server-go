@@ -300,8 +300,8 @@ func TestNewRuntimeDevelopmentRoutesSettlementLevelToStats(t *testing.T) {
 	conn := &runtimeCaptureConn{}
 	ctx := session.WithSession(context.Background(), session.New(conn))
 	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_LoginReq, &protocolpb.LoginReq{Code: "dev:level-route"})
-	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_CombatResultReq, &protocolpb.CombatResultReq{RunId: "route-level-2", DungeonLevel: 2, Score: 10, Kills: 1, DurationMs: 1_000, StyleId: 1, Outcome: protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY, PlayerLevel: 2})
-	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_CombatResultReq, &protocolpb.CombatResultReq{RunId: "route-level-1", DungeonLevel: 2, Score: 10, Kills: 1, DurationMs: 1_000, StyleId: 1, Outcome: protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY, PlayerLevel: 1})
+	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_CombatResultReq, &protocolpb.CombatResultReq{RunId: "route-level-2", DungeonLevel: 2, Score: 10, Kills: 1, SurvivalTime: 1, StyleId: 1, Outcome: protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY, PlayerLevel: 2})
+	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_CombatResultReq, &protocolpb.CombatResultReq{RunId: "route-level-1", DungeonLevel: 2, Score: 10, Kills: 1, SurvivalTime: 1, StyleId: 1, Outcome: protocolpb.BattleOutcome_BATTLE_OUTCOME_VICTORY, PlayerLevel: 1})
 	dispatchRuntimeRequest(t, appRuntime, ctx, protocol.MsgID_GetPlayerStatsReq, &protocolpb.GetPlayerStatsReq{})
 	if len(conn.frames) != 4 {
 		t.Fatalf("response frames = %d, want 4", len(conn.frames))

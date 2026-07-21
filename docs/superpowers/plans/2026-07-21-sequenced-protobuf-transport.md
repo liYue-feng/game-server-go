@@ -16,7 +16,7 @@
 - Conflict resolution preserves the current local implementation semantics.
 - Each repository owns `proto/game.proto`; the two files must be byte-identical and have the same raw SHA-256.
 - Preserve the complete current business schema, package `game.protocol.v1`, Go package `game-server/internal/protocolpb;protocolpb`, C# namespace `Game.Protocol`, all 32 message IDs, typed archives, typed score metadata, combat `run_id`, outcome, archive snapshot, and duplicate settlement fields.
-- `CombatResultReq.duration_ms` remains protobuf `int64`, Go `int64`, and C# `long`; do not replace it with desktop-proto `double survival_time`.
+- `CombatResultReq.survival_time` field 5 is protobuf `double`, Go `float64`, and C# `double`, measured in seconds; `ScoreMetadata.duration_ms` field 1 remains the unrelated `int64` millisecond field.
 - The frame is little-endian `[Length uint32][MsgID uint16][Seq uint32][protobuf body]`; `Length = 10 + body length`, `HeaderSize = 10`, and `MaxFrameSize = 64 KiB` including the header.
 - Ordinary requests require nonzero `seq`; responses echo it; server pushes use `seq=0`; a client request with `seq=0` closes the connection without an `ErrorResp`.
 - No 6-byte or JSON-body compatibility layer is retained.
@@ -773,5 +773,5 @@ Only after the final gate-open evidence may the new protocol be deployed, starte
 
 - Spec coverage: Tasks 1-8 cover schema ownership, local generation, 10-byte framing, sequence rules, pending atomicity, error/close behavior, all request owners, push semantics, combat retry, real-backend acceptance, and the cross-repository release gate.
 - Placeholder scan: the plan contains no deferred implementation step or unspecified edge-case instruction.
-- Type consistency: `seq` is `uint32`/`uint`; message IDs are `uint16`/`ushort`; `duration_ms` remains `int64`/`long`; business `run_id` remains `string`.
+- Type consistency: `seq` is `uint32`/`uint`; message IDs are `uint16`/`ushort`; combat `survival_time` is `double`/`float64` seconds; `ScoreMetadata.duration_ms` remains `int64`/`long`; business `run_id` remains `string`.
 - Scope separation: combat resource generation and asset auditing are intentionally handled by the separate client plan `2026-07-21-combat-resource-engineering.md`.
