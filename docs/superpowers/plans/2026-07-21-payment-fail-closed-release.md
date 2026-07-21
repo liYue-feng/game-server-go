@@ -29,18 +29,21 @@
 - Delete: `internal/payment/pusher.go`
 - Delete: `internal/payment/constants.go`
 - Modify: `internal/config/config.go`
+- Modify: `internal/protocol/common.go`
 - Modify: `configs/config.yaml`
 - Modify: `cmd/server/main.go`
 - Modify: `cmd/server/main_test.go`
+- Modify: client `Assets/Tests/EditMode/Online/PaymentAndGmSessionServiceTests.cs`
 
 **Interfaces:**
 - Produces: `payment.NewDisabledHandler() *payment.Handler`.
 - Produces: `(*payment.Handler).CreateOrder(context.Context, *protocolpb.CreateOrderReq) (*protocolpb.CreateOrderResp, error)` with no side effects.
 - Produces: `WechatConfig.PaymentEnabled bool` mapped from `payment_enabled`.
+- Produces: `protocol.ErrPaymentUnavailable = 60001` and message `payment is disabled`.
 
 - [ ] **Step 1: Write failing disabled-boundary tests**
 
-Add tests that prove `CreateOrder` returns a business error, the runtime registers the route, no callback server exists, and `payment_enabled: true` fails before the injected store openers run.
+Add tests that prove `CreateOrder` returns code `60001`, both runtimes register the route, authenticated kernel dispatch echoes the nonzero request sequence, no callback server exists, and `payment_enabled: true` plus `GAME_WECHAT_PAYMENT_ENABLED=true` fail before the injected store openers run. Add a Unity payment test proving wrong-sequence error is ignored, matching `60001` error invokes failure exactly once, success remains unset, and `PaymentResult` does not fire.
 
 - [ ] **Step 2: Run focused tests and verify RED**
 
@@ -54,6 +57,8 @@ Expected: failures because the placeholder handler still accepts callbacks and s
 
 Replace the handler with a dependency-free implementation. Remove callback parsing, verification stubs, product definitions, order mutation, delivery, and pushing. Register the disabled handler for `MsgID_CreateOrderReq` in both runtime branches. Remove callback HTTP server construction and its request-body helper. Reject `PaymentEnabled` at the beginning of `newRuntime`.
 
+Retain `model.PaymentOrder`, AutoMigrate, and MySQL order CRUD unchanged so existing databases and historical rows are not destructively migrated.
+
 - [ ] **Step 4: Run focused and full server verification**
 
 ```powershell
@@ -65,11 +70,15 @@ go build ./...
 
 Expected: all commands exit 0; no listener or callback code remains.
 
+Run the owned development integration runner once and assert WebSocket login succeeds while port `8081` has no listener. This process-level check also covers the disabled route's coexistence with normal server startup.
+
 - [ ] **Step 5: Commit**
 
 ```powershell
-git add internal/payment internal/config/config.go configs/config.yaml cmd/server/main.go cmd/server/main_test.go docs/superpowers/specs/2026-07-21-payment-fail-closed-release-design.md docs/superpowers/plans/2026-07-21-payment-fail-closed-release.md
+git add internal/payment internal/config/config.go internal/protocol/common.go configs/config.yaml cmd/server/main.go cmd/server/main_test.go docs/superpowers/specs/2026-07-21-payment-fail-closed-release-design.md docs/superpowers/plans/2026-07-21-payment-fail-closed-release.md
 git commit -m "fix: disable incomplete payment boundary"
+git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport add Assets/Tests/EditMode/Online/PaymentAndGmSessionServiceTests.cs
+git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport commit -m "test: cover disabled payment response"
 ```
 
 ### Task 2: Correct Authoritative Transport Documentation
@@ -78,6 +87,8 @@ git commit -m "fix: disable incomplete payment boundary"
 - Modify: server `AGENTS.md`
 - Modify: server `CLAUDE.md`
 - Modify: server `internal/transport/connection.go`
+- Modify: server `README.md`
+- Modify: server `docker-compose.yml`
 - Modify: client `CLAUDE.md`
 - Test: server `tools/protobuf/Generate-Protocol.Tests.ps1`
 - Test: client `tools/protobuf/GeneratedProtocol.Tests.ps1`
@@ -87,7 +98,7 @@ git commit -m "fix: disable incomplete payment boundary"
 
 - [ ] **Step 1: Add failing stale-documentation scans**
 
-Extend each repository's protocol Pester suite to read its authoritative instruction files and reject the old 6-byte or `[Length][MsgID]`-only description.
+Extend each repository's protocol Pester suite to read its authoritative instruction files and reject the old 6-byte or `[Length][MsgID]`-only description. The server suite also asserts README marks payment disabled and Docker Compose does not publish `8081`.
 
 - [ ] **Step 2: Run both Pester suites and verify RED**
 
@@ -100,7 +111,7 @@ Expected: failures naming the stale instruction/comment files.
 
 - [ ] **Step 3: Update the authoritative text**
 
-Document the exact 10-byte little-endian frame and sequence ownership in all four locations. Do not rewrite unrelated repository guidance.
+Document the exact 10-byte little-endian frame and sequence ownership in all current authoritative locations, including README. Mark payment IDs as reserved/disabled and remove the Docker `8081` publication. Do not rewrite historical design documents or delete existing payment database models.
 
 - [ ] **Step 4: Run documentation, protocol, and diff gates**
 
@@ -115,7 +126,7 @@ Expected: all tests pass and no stale 6-byte description remains.
 - [ ] **Step 5: Commit each repository locally**
 
 ```powershell
-git -C E:/Own_project/game-server-go/.worktrees/sequenced-protobuf-transport add AGENTS.md CLAUDE.md internal/transport/connection.go tools/protobuf/Generate-Protocol.Tests.ps1
+git -C E:/Own_project/game-server-go/.worktrees/sequenced-protobuf-transport add AGENTS.md CLAUDE.md README.md docker-compose.yml internal/transport/connection.go tools/protobuf/Generate-Protocol.Tests.ps1
 git -C E:/Own_project/game-server-go/.worktrees/sequenced-protobuf-transport commit -m "docs: describe sequenced protobuf frames"
 git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport add CLAUDE.md tools/protobuf/GeneratedProtocol.Tests.ps1
 git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport commit -m "docs: describe sequenced protobuf frames"

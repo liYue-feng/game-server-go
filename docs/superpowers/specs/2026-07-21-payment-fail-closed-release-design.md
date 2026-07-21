@@ -16,10 +16,12 @@ This release disables production payment fail-closed. It preserves the protobuf 
 
 - `internal/payment.Handler` is a disabled protocol boundary with no database, Redis, verifier, or pusher dependency.
 - `Handler.CreateOrder` always returns a protobuf business error and performs no side effect.
+- The stable client contract is `ErrorResp{code: 60001, msg: "payment is disabled"}` with the original request sequence.
 - The unsigned callback handler, body-only verifier, placeholder product map, logging-only delivery, order-store adapter, and payment pusher are removed.
 - `cmd/server` registers the disabled `CreateOrderReq` route in both development and production runtimes so clients receive a correlated error rather than a silent unsupported route.
 - `cmd/server` does not construct an HTTP payment server or listen on port `8081`.
 - `newRuntime` rejects `payment_enabled: true` before opening MySQL or Redis.
+- Existing `payment_orders` schema/model and MySQL CRUD are retained unchanged as dormant legacy data access. This release does not delete or migrate historical order data.
 
 ## Future Enablement Contract
 
@@ -39,12 +41,14 @@ No development shortcut may share the production callback route or production en
 
 Authoritative repository instructions and transport comments must describe the 10-byte little-endian frame `[Length uint32][MsgID uint16][Seq uint32]`, ordinary nonzero request sequences, echoed response sequences, and `seq=0` pushes. Removed 6-byte descriptions are release blockers.
 
+The current README must state that payment protocol IDs are reserved but production payment is disabled. Docker Compose must not publish port `8081`.
+
 ## Acceptance
 
 - A `CreateOrderReq` receives a matching nonzero-sequence `ErrorResp` and creates no order.
+- A mismatched response sequence does not complete the Unity payment request, and the matching `60001` error completes failure exactly once without emitting a payment push.
 - Payment-disabled startup opens the normal WebSocket server but no callback listener.
-- `payment_enabled: true` fails before any external store is opened.
+- `payment_enabled: true`, including `GAME_WECHAT_PAYMENT_ENABLED=true`, fails before any external store is opened.
 - No production code accepts a body-only payment callback or reports a delivered entitlement.
 - Go test/vet/build and protocol/integration verification remain green.
 - Current-state docs contain no 6-byte frame description.
-
