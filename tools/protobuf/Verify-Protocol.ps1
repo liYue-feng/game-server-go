@@ -5,6 +5,9 @@ $ErrorActionPreference = 'Stop'
 $backendRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $schemaPath = Join-Path $backendRoot 'proto\game.proto'
 $generatedGoPath = Join-Path $backendRoot 'internal\protocolpb\game.pb.go'
+$codecPath = Join-Path $backendRoot 'internal\protocol\codec.go'
+$kernelPath = Join-Path $backendRoot 'internal\kernel\kernel.go'
+$connectionPath = Join-Path $backendRoot 'internal\transport\connection.go'
 
 function Assert-Contains {
     param([string]$Content, [string]$Expected)
@@ -83,6 +86,26 @@ if (-not (Test-Path -LiteralPath $generatedGoPath -PathType Leaf)) {
 $generated = Get-Content -LiteralPath $generatedGoPath -Raw
 Assert-Contains -Content $generated -Expected 'protoc-gen-go v1.36.11'
 
+$codec = Get-Content -LiteralPath $codecPath -Raw
+@(
+    'HeaderSize   = 10',
+    'binary.LittleEndian.PutUint32(frame[:4], uint32(totalLen))',
+    'binary.LittleEndian.PutUint16(frame[4:6], msgID)',
+    'binary.LittleEndian.PutUint32(frame[6:10], seq)',
+    'Seq:   binary.LittleEndian.Uint32(data[6:10])'
+) | ForEach-Object { Assert-Contains -Content $codec -Expected $_ }
+
+$kernel = Get-Content -LiteralPath $kernelPath -Raw
+@(
+    'if frame.Seq == 0 {',
+    'k.finish(sess, frame.Seq, entry, response, handlerErr)',
+    'sess.Reply(seq, entry.respID, message)',
+    'sess.Reply(seq, protocol.MsgID_Error'
+) | ForEach-Object { Assert-Contains -Content $kernel -Expected $_ }
+
+$connection = Get-Content -LiteralPath $connectionPath -Raw
+Assert-Contains -Content $connection -Expected 'return c.sendMessage(0, msgID, payload)'
+
 if ([string]::IsNullOrWhiteSpace($ClientRoot)) {
     $backendParent = Split-Path $backendRoot -Parent
     $isWorktree = (Split-Path $backendParent -Leaf) -eq '.worktrees'
@@ -121,3 +144,4 @@ if ($LASTEXITCODE -ne 0) { throw 'Generated protocol drift check failed.' }
 
 Write-Output "Schema SHA256=$(Get-RawSha256 -Path $schemaPath)"
 Write-Output "Go output SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $generatedGoPath).Hash)"
+Write-Output 'FRAME_EVIDENCE=header=10 little_endian=1 request_seq_nonzero=1 response_seq_echo=1 pushes_seq_zero=1'

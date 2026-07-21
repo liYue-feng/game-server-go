@@ -106,9 +106,30 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 }
 
 func TestProbeSuccessEvidenceDescribesTheTypedArchiveContract(t *testing.T) {
-	const want = "development session probe passed: protobuf login found=false typed save typed reload combat duplicate"
+	const want = "development session probe passed: sequenced protobuf login found=false typed save typed reload combat duplicate"
 	if probeSuccessEvidence != want {
 		t.Fatalf("probeSuccessEvidence = %q, want %q", probeSuccessEvidence, want)
+	}
+}
+
+func TestProbeRejectsZeroSequenceErrorResponse(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, err := readProbeMessage(conn, protocol.MsgID_LoginReq, &protocolpb.LoginReq{}); err != nil {
+			return
+		}
+		_ = writeProbeMessage(conn, protocol.MsgID_Error, 0, &protocolpb.ErrorResp{Code: 1, Msg: "rejected"})
+	}))
+	defer server.Close()
+
+	err := runProbe("ws" + strings.TrimPrefix(server.URL, "http"))
+	if err == nil || !strings.Contains(err.Error(), "response seq = 0, want 1") {
+		t.Fatalf("runProbe error = %v, want zero-sequence correlation rejection", err)
 	}
 }
 
@@ -123,6 +144,9 @@ func readProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) (u
 	}
 	if decoded.MsgID != id {
 		return 0, fmt.Errorf("message ID = %d, want %d", decoded.MsgID, id)
+	}
+	if decoded.Seq == 0 {
+		return 0, fmt.Errorf("request sequence is zero for message ID %d", id)
 	}
 	return decoded.Seq, proto.Unmarshal(decoded.Body, message)
 }

@@ -17,7 +17,7 @@ import (
 const (
 	probeAddress         = "ws://127.0.0.1:8080/ws"
 	probeTimeout         = 5 * time.Second
-	probeSuccessEvidence = "development session probe passed: protobuf login found=false typed save typed reload combat duplicate"
+	probeSuccessEvidence = "development session probe passed: sequenced protobuf login found=false typed save typed reload combat duplicate"
 )
 
 type probe struct {
@@ -204,6 +204,9 @@ func (p *probe) read(expectedMsgID uint16, expectedSeq uint32, destination proto
 	if err != nil {
 		return fmt.Errorf("decode response for message %d: %w", expectedMsgID, err)
 	}
+	if message.Seq != expectedSeq {
+		return fmt.Errorf("response seq = %d, want %d", message.Seq, expectedSeq)
+	}
 	if message.MsgID == protocol.MsgID_Error {
 		var errorResponse protocolpb.ErrorResp
 		if err := proto.Unmarshal(message.Body, &errorResponse); err != nil {
@@ -213,9 +216,6 @@ func (p *probe) read(expectedMsgID uint16, expectedSeq uint32, destination proto
 	}
 	if message.MsgID != expectedMsgID {
 		return fmt.Errorf("response message id = %d, want %d", message.MsgID, expectedMsgID)
-	}
-	if message.Seq != expectedSeq {
-		return fmt.Errorf("response seq = %d, want %d", message.Seq, expectedSeq)
 	}
 	if err := proto.Unmarshal(message.Body, destination); err != nil {
 		return fmt.Errorf("decode message %d body: %w", expectedMsgID, err)
