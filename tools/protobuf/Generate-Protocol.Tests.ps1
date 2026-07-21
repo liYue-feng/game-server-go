@@ -28,10 +28,13 @@ function Test-ComposeKeepsPaymentPortDisabled([string]$Content) {
 }
 
 function Test-PaymentLineHasSensitiveTopic([string]$Line) {
-    if ($Line -match '(?i)\bcallbacks?\b|\blisteners?\b') {
+    $hasCallbackOrListener = $Line -match '(?i)\bcallbacks?\b|\blisteners?\b'
+    $hasPaymentQualifier = $Line -match '(?i)\bpayments?\b'
+    $hasStandalonePaymentPort = $Line -match '(?<!\d)8081(?!\d)'
+    if ($hasCallbackOrListener -and ($hasPaymentQualifier -or $hasStandalonePaymentPort)) {
         return $true
     }
-    if ($Line -match '(?i)\bpayments?\b' -and
+    if ($hasPaymentQualifier -and
         $Line -match '(?i)\b(?:fulfill(?:s|ed|ing|ment)?|deliver(?:s|ed|ing|y)?|grant(?:s|ed|ing)?)\b') {
         return $true
     }
@@ -179,7 +182,9 @@ Describe 'Authoritative transport documentation' {
         @{ Name = 'English will-not negation'; Content = 'The server will not accept payment callbacks.' },
         @{ Name = 'English is-not contraction'; Content = "The server isn't accepting payment callbacks." },
         @{ Name = 'English are-not contraction'; Content = "Payment callbacks aren't active." },
-        @{ Name = 'English without negation'; Content = 'The server runs without payment callbacks.' }
+        @{ Name = 'English without negation'; Content = 'The server runs without payment callbacks.' },
+        @{ Name = 'unrelated event listener'; Content = 'The event listener updates the combat UI.' },
+        @{ Name = 'unrelated login callbacks'; Content = 'Login callbacks refresh the session token.' }
     )) {
         It "allows the $($case.Name) payment statement" {
             (Test-ContainsActivePaymentClaim -Content $case.Content) | Should Be $false
