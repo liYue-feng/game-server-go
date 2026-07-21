@@ -15,11 +15,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-var probeResponseSequences = struct {
-	sync.Mutex
-	values map[*websocket.Conn]uint32
-}{values: make(map[*websocket.Conn]uint32)}
-
 func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 	var mu sync.Mutex
 	archives := map[string]*protocolpb.PlayerArchive{}
@@ -34,35 +29,40 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 		}
 		defer conn.Close()
 		login := &protocolpb.LoginReq{}
-		if err := readProbeMessage(conn, protocol.MsgID_LoginReq, login); err != nil {
+		seq, err := readProbeMessage(conn, protocol.MsgID_LoginReq, login)
+		if err != nil {
 			return
 		}
-		_ = writeProbeMessage(conn, protocol.MsgID_LoginResp, &protocolpb.LoginResp{Uid: 42, Token: "token"})
-		if err := readProbeMessage(conn, protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
+		_ = writeProbeMessage(conn, protocol.MsgID_LoginResp, seq, &protocolpb.LoginResp{Uid: 42, Token: "token"})
+		seq, err = readProbeMessage(conn, protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{})
+		if err != nil {
 			return
 		}
 		mu.Lock()
 		initial := archives[login.Code]
 		mu.Unlock()
-		_ = writeProbeMessage(conn, protocol.MsgID_LoadArchiveResp, &protocolpb.LoadArchiveResp{Found: initial != nil, Archive: initial})
+		_ = writeProbeMessage(conn, protocol.MsgID_LoadArchiveResp, seq, &protocolpb.LoadArchiveResp{Found: initial != nil, Archive: initial})
 		save := &protocolpb.SaveArchiveReq{}
-		if err := readProbeMessage(conn, protocol.MsgID_SaveArchiveReq, save); err != nil {
+		seq, err = readProbeMessage(conn, protocol.MsgID_SaveArchiveReq, save)
+		if err != nil {
 			return
 		}
 		mu.Lock()
 		archives[login.Code] = save.Archive
 		savedArchives = append(savedArchives, proto.Clone(save.Archive).(*protocolpb.PlayerArchive))
 		mu.Unlock()
-		_ = writeProbeMessage(conn, protocol.MsgID_SaveArchiveResp, &protocolpb.SaveArchiveResp{Success: true})
-		if err := readProbeMessage(conn, protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{}); err != nil {
+		_ = writeProbeMessage(conn, protocol.MsgID_SaveArchiveResp, seq, &protocolpb.SaveArchiveResp{Success: true})
+		seq, err = readProbeMessage(conn, protocol.MsgID_LoadArchiveReq, &protocolpb.LoadArchiveReq{})
+		if err != nil {
 			return
 		}
 		mu.Lock()
 		final := archives[login.Code]
 		mu.Unlock()
-		_ = writeProbeMessage(conn, protocol.MsgID_LoadArchiveResp, &protocolpb.LoadArchiveResp{Found: final != nil, Archive: final})
+		_ = writeProbeMessage(conn, protocol.MsgID_LoadArchiveResp, seq, &protocolpb.LoadArchiveResp{Found: final != nil, Archive: final})
 		combat := &protocolpb.CombatResultReq{}
-		if err := readProbeMessage(conn, protocol.MsgID_CombatResultReq, combat); err != nil {
+		seq, err = readProbeMessage(conn, protocol.MsgID_CombatResultReq, combat)
+		if err != nil {
 			return
 		}
 		mu.Lock()
@@ -70,16 +70,17 @@ func TestRunProbeIsRepeatableAgainstPersistentDevelopmentStore(t *testing.T) {
 		combatRuns[combat.RunId] = true
 		combatRequests++
 		mu.Unlock()
-		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, &protocolpb.CombatResultResp{
+		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, seq, &protocolpb.CombatResultResp{
 			Success: true, Duplicate: duplicate, RunId: combat.RunId, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
 		})
-		if err := readProbeMessage(conn, protocol.MsgID_CombatResultReq, combat); err != nil {
+		seq, err = readProbeMessage(conn, protocol.MsgID_CombatResultReq, combat)
+		if err != nil {
 			return
 		}
 		mu.Lock()
 		combatRequests++
 		mu.Unlock()
-		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, &protocolpb.CombatResultResp{
+		_ = writeProbeMessage(conn, protocol.MsgID_CombatResultResp, seq, &protocolpb.CombatResultResp{
 			Success: true, Duplicate: true, RunId: combat.RunId, RewardGold: 10, RewardExp: 20, BestScore: 100, Archive: newProbeArchive(),
 		})
 	}))
@@ -111,25 +112,21 @@ func TestProbeSuccessEvidenceDescribesTheTypedArchiveContract(t *testing.T) {
 	}
 }
 
-func readProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) error {
+func readProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) (uint32, error) {
 	_, frame, err := conn.ReadMessage()
 	if err != nil {
-		return err
+		return 0, err
 	}
 	decoded, err := protocol.Decode(frame)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if decoded.MsgID != id {
-		return fmt.Errorf("message ID = %d, want %d", decoded.MsgID, id)
+		return 0, fmt.Errorf("message ID = %d, want %d", decoded.MsgID, id)
 	}
-	return proto.Unmarshal(decoded.Body, message)
+	return decoded.Seq, proto.Unmarshal(decoded.Body, message)
 }
-func writeProbeMessage(conn *websocket.Conn, id uint16, message proto.Message) error {
-	probeResponseSequences.Lock()
-	probeResponseSequences.values[conn]++
-	seq := probeResponseSequences.values[conn]
-	probeResponseSequences.Unlock()
+func writeProbeMessage(conn *websocket.Conn, id uint16, seq uint32, message proto.Message) error {
 	frame, err := protocol.Encode(id, seq, message)
 	if err != nil {
 		return err

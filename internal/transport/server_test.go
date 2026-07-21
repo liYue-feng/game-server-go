@@ -197,6 +197,37 @@ func TestServerRejectsWebSocketMessageOverReadLimit(t *testing.T) {
 	}
 }
 
+func TestReadPumpClosesOnFatalProtocolFramesWithoutErrorResponse(t *testing.T) {
+	for _, frame := range [][]byte{
+		func() []byte {
+			b, _ := protocol.Encode(protocol.MsgID_HeartbeatReq, 0, &protocol.HeartbeatReq{})
+			return b
+		}(),
+		make([]byte, protocol.HeaderSize-1),
+	} {
+		server := NewServer(kernel.New(nil))
+		addr := freeAddress(t)
+		done := startServer(t, server, addr)
+		ws := dialWebSocket(t, addr)
+		if err := ws.WriteMessage(websocket.BinaryMessage, frame); err != nil {
+			t.Fatal(err)
+		}
+		_ = ws.SetReadDeadline(time.Now().Add(lifecycleTestTimeout))
+		_, response, err := ws.ReadMessage()
+		if err == nil {
+			if message, decodeErr := protocol.Decode(response); decodeErr == nil && message.MsgID == protocol.MsgID_Error {
+				t.Fatal("fatal frame received ErrorResp")
+			}
+			t.Fatal("fatal frame did not close")
+		}
+		_ = ws.Close()
+		server.Shutdown()
+		if err := waitForError(t, done, "fatal protocol shutdown"); !errors.Is(err, http.ErrServerClosed) {
+			t.Fatal(err)
+		}
+	}
+}
+
 func startServer(t *testing.T, server *Server, addr string) <-chan error {
 	t.Helper()
 

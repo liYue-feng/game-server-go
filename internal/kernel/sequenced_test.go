@@ -11,10 +11,19 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-type seqConn struct{ seq uint32 }
+type seqConn struct {
+	seq                   uint32
+	replyCount, pushCount int
+	msgID                 uint16
+}
 
-func (c *seqConn) Reply(seq uint32, _ uint16, _ proto.Message) error { c.seq = seq; return nil }
-func (c *seqConn) Push(uint16, proto.Message) error                  { return nil }
+func (c *seqConn) Reply(seq uint32, id uint16, _ proto.Message) error {
+	c.replyCount++
+	c.seq = seq
+	c.msgID = id
+	return nil
+}
+func (c *seqConn) Push(uint16, proto.Message) error { c.pushCount++; return nil }
 
 func TestKernelEchoesRequestSeq(t *testing.T) {
 	k := New(nil)
@@ -39,7 +48,7 @@ func TestKernelRejectsZeroSeqWithoutErrorFrame(t *testing.T) {
 	if err := New(nil).Dispatch(ctx, frame); !errors.Is(err, ErrFatalProtocol) {
 		t.Fatalf("Dispatch error=%v want fatal", err)
 	}
-	if conn.seq != 0 {
-		t.Fatal("zero-seq frame emitted an error response")
+	if conn.replyCount != 0 || conn.pushCount != 0 {
+		t.Fatalf("zero-seq emitted reply=%d push=%d", conn.replyCount, conn.pushCount)
 	}
 }
