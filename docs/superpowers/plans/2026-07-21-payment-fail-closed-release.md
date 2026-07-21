@@ -34,6 +34,9 @@
 - Modify: `cmd/server/main.go`
 - Modify: `cmd/server/main_test.go`
 - Modify: client `Assets/Tests/EditMode/Online/PaymentAndGmSessionServiceTests.cs`
+- Modify: client `tools/integration/BackendIntegrationSupport.ps1`
+- Modify: client `tools/integration/BackendIntegrationSupport.Tests.ps1`
+- Modify: client `tools/integration/Invoke-A4BackendIntegration.ps1`
 
 **Interfaces:**
 - Produces: `payment.NewDisabledHandler() *payment.Handler`.
@@ -43,12 +46,13 @@
 
 - [ ] **Step 1: Write failing disabled-boundary tests**
 
-Add tests that prove `CreateOrder` returns code `60001`, both runtimes register the route, authenticated kernel dispatch echoes the nonzero request sequence, no callback server exists, and `payment_enabled: true` plus `GAME_WECHAT_PAYMENT_ENABLED=true` fail before the injected store openers run. Add a Unity payment test proving wrong-sequence error is ignored, matching `60001` error invokes failure exactly once, success remains unset, and `PaymentResult` does not fire.
+Add tests that prove `CreateOrder` returns code `60001`, both runtimes register the route, authenticated kernel dispatch echoes the distinctive request sequence `60001`, no callback server exists, and `payment_enabled: true` plus `GAME_WECHAT_PAYMENT_ENABLED=true` fail before the injected store openers run. Add a Unity payment test proving wrong-sequence error is ignored, matching `60001` error invokes failure exactly once, success remains unset, and `PaymentResult` does not fire. Add a runner-support test that, while the owned backend is healthy, requires an `8080` listener and rejects any `8081` listener.
 
 - [ ] **Step 2: Run focused tests and verify RED**
 
 ```powershell
 go test ./internal/payment ./cmd/server -count=1
+D:/Unity_Soft/2022/Editor/Unity.exe -batchmode -projectPath E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport -runTests -testPlatform EditMode -testFilter Game.Tests.EditMode.Online.PaymentAndGmSessionServiceTests -testResults Logs/payment-disabled-red.xml -logFile Logs/payment-disabled-red.log
 ```
 
 Expected: failures because the placeholder handler still accepts callbacks and startup still wires the callback server.
@@ -56,6 +60,8 @@ Expected: failures because the placeholder handler still accepts callbacks and s
 - [ ] **Step 3: Implement the disabled boundary**
 
 Replace the handler with a dependency-free implementation. Remove callback parsing, verification stubs, product definitions, order mutation, delivery, and pushing. Register the disabled handler for `MsgID_CreateOrderReq` in both runtime branches. Remove callback HTTP server construction and its request-body helper. Reject `PaymentEnabled` at the beginning of `newRuntime`.
+
+After the runner's `/health` readiness check, call the integration port helper and require port `8080` to be listening while port `8081` is absent. Keep the existing preflight unowned-port rejection and final cleanup checks.
 
 Retain `model.PaymentOrder`, AutoMigrate, and MySQL order CRUD unchanged so existing databases and historical rows are not destructively migrated.
 
@@ -66,6 +72,7 @@ go test ./internal/payment ./cmd/server -count=1
 go test ./... -count=1
 go vet ./...
 go build ./...
+D:/Unity_Soft/2022/Editor/Unity.exe -batchmode -projectPath E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport -runTests -testPlatform EditMode -testFilter Game.Tests.EditMode.Online.PaymentAndGmSessionServiceTests -testResults Logs/payment-disabled-green.xml -logFile Logs/payment-disabled-green.log
 ```
 
 Expected: all commands exit 0; no listener or callback code remains.
@@ -77,7 +84,7 @@ Run the owned development integration runner once and assert WebSocket login suc
 ```powershell
 git add internal/payment internal/config/config.go internal/protocol/common.go configs/config.yaml cmd/server/main.go cmd/server/main_test.go docs/superpowers/specs/2026-07-21-payment-fail-closed-release-design.md docs/superpowers/plans/2026-07-21-payment-fail-closed-release.md
 git commit -m "fix: disable incomplete payment boundary"
-git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport add Assets/Tests/EditMode/Online/PaymentAndGmSessionServiceTests.cs
+git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport add Assets/Tests/EditMode/Online/PaymentAndGmSessionServiceTests.cs tools/integration/BackendIntegrationSupport.ps1 tools/integration/BackendIntegrationSupport.Tests.ps1 tools/integration/Invoke-A4BackendIntegration.ps1
 git -C E:/Own_project/game-client-unity/.worktrees/sequenced-protobuf-transport commit -m "test: cover disabled payment response"
 ```
 
